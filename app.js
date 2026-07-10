@@ -1136,6 +1136,31 @@ function initTimeline() {
   renderTimeline();
 }
 
+function renderEmptyTimelineState() {
+  const centralSpine = document.querySelector('.timeline-central-spine');
+  if (centralSpine) centralSpine.style.display = 'none';
+  if (timeSpineIndicator) timeSpineIndicator.classList.add('hidden');
+  
+  timelineEvents.style.position = 'static';
+  timelineEvents.style.height = 'auto';
+
+  timelineEvents.innerHTML = `
+    <div class="timeline-empty-card" style="margin-top: 24px; padding: 48px 32px; border: 1px solid var(--border-color); border-radius: 0px; background-color: rgba(0, 0, 0, 0.005); text-align: center; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px;">
+      <!-- Elegant Sun/Focus Zen Outline Icon -->
+      <svg style="width: 40px; height: 40px; color: var(--accent-color); opacity: 0.85; stroke-width: 1.2; flex-shrink: 0;" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
+      </svg>
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <h3 style="font-family: var(--font-serif); font-size: 1.1rem; font-weight: 700; color: var(--text-primary); letter-spacing: 0.5px;">今天，時光無痕</h3>
+        <span style="font-size: 0.7rem; color: var(--text-secondary); letter-spacing: 1px; text-transform: uppercase; font-weight: 500;">A Day in Quietude</span>
+      </div>
+      <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; max-width: 280px; margin: 0;">
+        當下沒有任何安排。不妨慢下來，泡杯茶，享受這段安靜的留白。
+      </p>
+    </div>
+  `;
+}
+
 function renderTimeline() {
   // Clear timeline list
   timelineEvents.innerHTML = '';
@@ -1154,12 +1179,8 @@ function renderTimeline() {
   allDayContainer.innerHTML = '';
   
   if (googleEvents.length === 0) {
-    timelineEvents.innerHTML = `
-      <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; padding: 40px 0; letter-spacing: 0.5px;">
-        TODAY HAS NO SCHEDULED EVENTS /
-      </div>
-    `;
     allDayContainer.style.display = 'none';
+    renderEmptyTimelineState();
     return;
   }
 
@@ -1195,13 +1216,24 @@ function renderTimeline() {
 
   // Render Timed Events Timeline at the bottom
   if (timedEvents.length === 0) {
+    const centralSpine = document.querySelector('.timeline-central-spine');
+    if (centralSpine) centralSpine.style.display = 'none';
+    if (timeSpineIndicator) timeSpineIndicator.classList.add('hidden');
+    
+    timelineEvents.style.position = 'static';
+    timelineEvents.style.height = 'auto';
+    
     timelineEvents.innerHTML = `
-      <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; padding: 40px 0; letter-spacing: 0.5px;">
-        NO TIMED EVENTS SCHEDULED TODAY /
+      <div class="timeline-empty-card" style="margin-top: 16px; padding: 32px 0; border: 1px dashed var(--border-color); text-align: center; color: var(--text-secondary); font-size: 0.85rem; font-family: var(--font-serif); letter-spacing: 0.5px;">
+        今日無特定時間行程 / NO TIMED EVENTS
       </div>
     `;
     return;
   }
+
+  // Restore spine visibility and container styles when we have timedEvents
+  const centralSpine = document.querySelector('.timeline-central-spine');
+  if (centralSpine) centralSpine.style.display = 'block';
 
   // Calculate timeline start & end boundaries based on today's events range
   const firstStart = parseTimeToMinutes(timedEvents[0].start);
