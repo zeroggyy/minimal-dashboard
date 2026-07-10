@@ -1,0 +1,1318 @@
+// Mock Google Calendar Data (Emojis removed, using clean text only)
+const MOCK_EVENTS = [
+  {
+    id: 1,
+    title: "朝晨正念與拉伸",
+    start: "08:15",
+    end: "09:00",
+    type: "break"
+  },
+  {
+    id: 2,
+    title: "核心專案進度對齊會議",
+    start: "09:30",
+    end: "11:00",
+    type: "task"
+  },
+  {
+    id: 3,
+    title: "下季度儀表板產品規劃",
+    start: "11:15",
+    end: "12:30",
+    type: "planning"
+  },
+  {
+    id: 4,
+    title: "午餐 & 散步放鬆",
+    start: "12:30",
+    end: "13:30",
+    type: "break"
+  },
+  {
+    id: 5,
+    title: "系統架構重構與程式碼編寫",
+    start: "14:00",
+    end: "16:30",
+    type: "task"
+  },
+  {
+    id: 6,
+    title: "讀書會 / 技術文章研讀",
+    start: "17:00",
+    end: "18:00",
+    type: "planning"
+  },
+  {
+    id: 7,
+    title: "慢跑 5 公里 / 核心訓練",
+    start: "19:00",
+    end: "20:00",
+    type: "break"
+  },
+  {
+    id: 8,
+    title: "撰寫今日覆盤與明日規劃",
+    start: "20:30",
+    end: "21:30",
+    type: "planning"
+  }
+];
+
+// Google OAuth Settings
+const CLIENT_ID = '207400675861-rdrar5tbitmjhouimpktvbpv4q80g4ct.apps.googleusercontent.com';
+const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks';
+
+// Storage Key for Google Token
+const STORAGE_TOKEN_KEY = 'google_oauth_token';
+
+// Global variables for Google integration
+let googleAccessToken = null;
+let googleEvents = [];
+let googleTaskLists = []; // Cache list IDs and names
+let googleCalendarLists = []; // Cache calendar IDs and names
+
+// DOM Elements
+const currentDateEl = document.getElementById('current-date');
+const currentTimeTextEl = document.getElementById('current-time-text');
+const greetingEl = document.getElementById('greeting');
+const todoForm = document.getElementById('todo-form');
+const todoInput = document.getElementById('todo-input');
+const todoList = document.getElementById('todo-list');
+const todoCounter = document.getElementById('todo-counter');
+const todoWarning = document.getElementById('todo-warning');
+const timelineEvents = document.getElementById('timeline-events');
+const timeSpineIndicator = document.getElementById('time-spine-indicator');
+const spineTimeLabel = document.getElementById('spine-time-label');
+const syncBtn = document.getElementById('sync-btn');
+
+// State
+let overdueTodos = [];
+let todayTodos = [];
+let backlogTodos = [];
+let overlayIsEditing = false;
+let activeOverlayTodo = null;
+
+// Initialize Dashboard
+document.addEventListener('DOMContentLoaded', () => {
+  initDateAndTime();
+  initTodo();
+  initTimeline();
+  initDashboardTabs();
+  initGoogleAuth();
+  initTodoAccordion();
+  
+  // Refresh interactive icon elements loaded via Lucide
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+
+  // Update time indicator immediately and set interval for every 1 minute
+  updateTimeIndicator();
+  setInterval(() => {
+    updateTimeIndicator();
+    updateHeaderTime();
+  }, 60000);
+
+  // Bind Overlay Actions
+  const detailOverlay = document.getElementById('detail-overlay');
+  const overlayCloseBtn = document.getElementById('overlay-close-btn');
+  const overlayEditBtn = document.getElementById('overlay-edit-btn');
+  
+  if (overlayCloseBtn && detailOverlay) {
+    overlayCloseBtn.addEventListener('click', () => {
+      // Exit edit mode if active before closing overlay
+      if (overlayIsEditing) {
+        toggleOverlayEditMode(false);
+      }
+      detailOverlay.classList.add('hidden');
+    });
+    // Click backdrop to close
+    detailOverlay.addEventListener('click', (e) => {
+      if (e.target === detailOverlay) {
+        if (overlayIsEditing) {
+          toggleOverlayEditMode(false);
+        }
+        detailOverlay.classList.add('hidden');
+      }
+    });
+  }
+
+  if (overlayEditBtn) {
+    overlayEditBtn.addEventListener('click', () => {
+      if (overlayIsEditing) {
+        // Save action
+        saveOverlayChanges();
+      } else {
+        // Enter edit mode action
+        toggleOverlayEditMode(true);
+      }
+    });
+  }
+});
+
+// Bind accordion click handlers
+function initTodoAccordion() {
+  const overdueTitle = document.getElementById('title-overdue');
+  const overdueWrapper = document.getElementById('wrapper-overdue');
+
+  if (overdueTitle && overdueWrapper) {
+    overdueTitle.addEventListener('click', () => {
+      overdueTitle.classList.toggle('active');
+      overdueWrapper.classList.toggle('collapsed');
+    });
+  }
+}
+
+// Dashboard Tabs Handler (Global single column)
+function initDashboardTabs() {
+  const tabButtons = document.querySelectorAll('.tab-btn');
+  const panelTodo = document.getElementById('panel-todo');
+  const panelTimeline = document.getElementById('panel-timeline');
+
+  tabButtons.forEach(button => {
+    button.addEventListener('click', () => {
+      // 1. Reset active buttons
+      tabButtons.forEach(btn => btn.classList.remove('active'));
+      // 2. Active clicked button
+      button.classList.add('active');
+
+      // 3. Switch active panels
+      const target = button.getAttribute('data-target');
+      if (target === 'todo') {
+        panelTodo.classList.add('active-panel');
+        panelTimeline.classList.remove('active-panel');
+      } else if (target === 'timeline') {
+        panelTodo.classList.remove('active-panel');
+        panelTimeline.classList.add('active-panel');
+        // Instantly recalculate indicator & layout just in case
+        updateTimeIndicator();
+      }
+    });
+  });
+}
+
+// 1. Date and Time Init
+function initDateAndTime() {
+  const now = new Date();
+  
+  // Format Date to a clean editorial dot separated Chinese style (e.g., 2026 . 07 . 10 / 五)
+  const weekdaysChinese = ["日", "一", "二", "三", "四", "五", "六"];
+  
+  const yyyy = now.getFullYear();
+  const mm = String(now.getMonth() + 1).padStart(2, '0');
+  const dd = String(now.getDate()).padStart(2, '0');
+  const dayName = weekdaysChinese[now.getDay()];
+  
+  currentDateEl.innerHTML = `${yyyy} . ${mm} . ${dd} / <span class="header-day-chinese">${dayName}</span>`;
+  
+  // Curated list of Zen/Minimal Focus and warm literary/movie-like quotes to randomly display (Optimized for short single line)
+  const focusQuotes = [
+    "少，但是更好。 / LESS, BUT BETTER.",
+    "心無旁騖，純粹前行。 / STAY FOCUS.",
+    "專注當下，日拱一卒。 / HERE AND NOW.",
+    "簡約是把雜訊降到最低。 / SILENT MIND.",
+    "做好手頭這一件事。 / ONE TASK.",
+    "靜水流深，行穩致遠。 / FLOW DEEP.",
+    "心有所定，萬物不侵。 / STAY CENTERED.",
+    "你所謂的歲月靜好，不過是有人替你負重前行。 / SILENT SACRIFICE.",
+    "願你在平淡日常，看見深刻溫柔。 / FIND WARMTH.",
+    "慢下來，聽聽時間的聲音。 / SLOW FLOW.",
+    "給自己留一處純粹的偏安。 / STAY CALM.",
+    "所有日常，都有人在替你擋雨。 / SHIELD THE RAIN.",
+    "既隨遇而安，也默默堅持。 / STAY RESILIENT.",
+    "最珍貴的日常，藏在微小瞬間。 / GOLDEN MOMENTS.",
+    "慢慢走，風景都是生活的饋贈。 / SLOW JOURNEY.",
+    "有熱湯，有夢想，也有力量。 / HEAT AND DREAMS.",
+    "平凡的今天，就是最好的致敬。 / CHERISH TODAY."
+  ];
+  
+  // Pick a random quote
+  const randomIndex = Math.floor(Math.random() * focusQuotes.length);
+  greetingEl.textContent = focusQuotes[randomIndex];
+
+  updateHeaderTime();
+}
+
+function updateHeaderTime() {
+  const now = new Date();
+  const hours = String(now.getHours()).padStart(2, '0');
+  const minutes = String(now.getMinutes()).padStart(2, '0');
+  currentTimeTextEl.textContent = `${hours}:${minutes}`;
+}
+
+// 2. Google OAuth 2.0 Integration
+let tokenClient;
+
+// Global Timeline Scale configuration parameters for Scheme B
+let timelineStartMin = 540; // 09:00 default
+let timelineDurationMins = 860; // 09:00 to 23:20 default
+const TIMELINE_HEIGHT = 700; // 700px physical scale ruler height
+
+function initGoogleAuth() {
+  // Check if we already have a token stored in session storage (lasts until tab close)
+  const savedToken = sessionStorage.getItem(STORAGE_TOKEN_KEY);
+  if (savedToken) {
+    googleAccessToken = savedToken;
+    updateSyncButtonState('synced');
+    syncGoogleData();
+  }
+
+  // Bind click event to Sync button
+  syncBtn.addEventListener('click', () => {
+    if (googleAccessToken) {
+      // If already synced, click forces a data reload
+      syncGoogleData();
+    } else {
+      authenticateWithGoogle();
+    }
+  });
+}
+
+function authenticateWithGoogle() {
+  updateSyncButtonState('syncing');
+  
+  try {
+    if (typeof google === 'undefined') {
+      alert("Google SDK 尚未載入完成，請確認網路連線或重新整理頁面。");
+      updateSyncButtonState('idle');
+      return;
+    }
+
+    tokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: CLIENT_ID,
+      scope: SCOPES,
+      callback: (tokenResponse) => {
+        if (tokenResponse.error !== undefined) {
+          console.error("Google Auth Error: ", tokenResponse);
+          updateSyncButtonState('idle');
+          return;
+        }
+        
+        // Save token to session and global state
+        googleAccessToken = tokenResponse.access_token;
+        sessionStorage.setItem(STORAGE_TOKEN_KEY, googleAccessToken);
+        
+        updateSyncButtonState('synced');
+        syncGoogleData();
+      },
+      error_callback: (err) => {
+        console.error("Google Auth Init Error: ", err);
+        updateSyncButtonState('idle');
+      }
+    });
+
+    tokenClient.requestAccessToken({ prompt: 'consent' });
+  } catch (err) {
+    console.error("Authentication trigger failed: ", err);
+    updateSyncButtonState('idle');
+  }
+}
+
+function updateSyncButtonState(state) {
+  if (state === 'syncing') {
+    syncBtn.className = 'sync-btn syncing';
+    syncBtn.innerHTML = `<span>SYNCING...</span><span class="slash"> /</span>`;
+    syncBtn.disabled = true;
+  } else if (state === 'synced') {
+    syncBtn.className = 'sync-btn synced';
+    syncBtn.innerHTML = `<span>SYNCED</span><span class="slash"> /</span>`;
+    syncBtn.disabled = false;
+  } else {
+    syncBtn.className = 'sync-btn';
+    syncBtn.innerHTML = `<span>SYNC</span><span class="slash"> /</span>`;
+    syncBtn.disabled = false;
+  }
+}
+
+// Global data synchronization coordinator
+async function syncGoogleData() {
+  if (!googleAccessToken) return;
+  updateSyncButtonState('syncing');
+  
+  // Decouple task and calendar synchronization to prevent one failing service from crashing the other
+  try {
+    await syncAllGoogleTasks();
+  } catch (err) {
+    console.error("Syncing Google Tasks failed: ", err);
+    if (err.status === 401) {
+      handleAuthExpired();
+      return;
+    }
+  }
+
+  try {
+    await syncAllGoogleCalendars();
+  } catch (err) {
+    console.error("Syncing Google Calendars failed: ", err);
+    if (err.status === 401) {
+      handleAuthExpired();
+      return;
+    }
+  }
+
+  updateSyncButtonState('synced');
+}
+
+function handleAuthExpired() {
+  googleAccessToken = null;
+  sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+  updateSyncButtonState('idle');
+}
+
+// Helper to determine if a date string is in the past (overdue)
+function isOverdue(dueStr) {
+  if (!dueStr) return false;
+  const due = new Date(dueStr);
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  return due.getTime() < todayStart.getTime();
+}
+
+// Helper to determine if a date string is today
+function isToday(dueStr) {
+  if (!dueStr) return false;
+  const due = new Date(dueStr);
+  const today = new Date();
+  return due.getFullYear() === today.getFullYear() &&
+         due.getMonth() === today.getMonth() &&
+         due.getDate() === today.getDate();
+}
+
+// 3. Multi-TaskList Explorer & Google Tasks API
+function initTodo() {
+  if (!googleAccessToken) {
+    const savedOverdue = localStorage.getItem('overdue_todos');
+    const savedToday = localStorage.getItem('today_todos');
+    const savedBacklog = localStorage.getItem('backlog_todos');
+
+    overdueTodos = savedOverdue ? JSON.parse(savedOverdue) : [];
+    todayTodos = savedToday ? JSON.parse(savedToday) : [
+      { id: 'mock-1', text: "點擊頂部 SYNC 串接您的 Google Tasks", listId: '@default', completed: false, taskLink: 'https://calendar.google.com/calendar/u/0/r/week?sidebar=tasks' }
+    ];
+    backlogTodos = savedBacklog ? JSON.parse(savedBacklog) : [];
+    
+    renderTodos();
+  }
+
+  todoForm.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const text = todoInput.value.trim();
+    if (!text) return;
+
+    // Today's focus is limited to 3
+    if (todayTodos.length >= 3) {
+      showWarning();
+      return;
+    }
+
+    const targetListId = googleTaskLists.length > 0 ? googleTaskLists[0].id : '@default';
+
+    const newTodo = {
+      id: Date.now().toString(),
+      text,
+      listId: targetListId,
+      notes: '', // Initialize empty notes to prevent hasNotes check issues
+      taskLink: 'https://calendar.google.com/calendar/u/0/r/week?sidebar=tasks', // Fallback link
+      completed: false
+    };
+
+    todayTodos.push(newTodo);
+    todoInput.value = '';
+    hideWarning();
+    renderTodos();
+    saveTodosLocal();
+
+    if (googleAccessToken) {
+      try {
+        const todayStr = new Date().toISOString().split('T')[0] + 'T00:00:00.000Z'; // Set due date to today
+        const response = await fetch(`https://www.googleapis.com/tasks/v1/lists/${targetListId}/tasks`, {
+          method: 'POST',
+          headers: {
+            'Authorization': `Bearer ${googleAccessToken}`,
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            title: text,
+            status: 'needsAction',
+            due: todayStr
+          })
+        });
+        
+        if (!response.ok) throw new Error("Failed to insert task on Google.");
+        
+        const taskData = await response.json();
+        todayTodos = todayTodos.map(t => t.id === newTodo.id ? { ...t, id: taskData.id } : t);
+        saveTodosLocal();
+      } catch (err) {
+        console.error("Google Task push failed: ", err);
+      }
+    }
+  });
+}
+
+// Fetch all TaskLists and categorise tasks by due date
+async function syncAllGoogleTasks() {
+  try {
+    const listResponse = await fetch('https://www.googleapis.com/tasks/v1/users/@me/lists', {
+      headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+    });
+    
+    if (!listResponse.ok) throw new Error("Fetch TaskLists Failed");
+    
+    const listsData = await listResponse.json();
+    googleTaskLists = listsData.items || [];
+    
+    if (googleTaskLists.length === 0) {
+      overdueTodos = [];
+      todayTodos = [];
+      backlogTodos = [];
+      renderTodos();
+      return;
+    }
+
+    let allFetchedTasks = [];
+    
+    const taskFetchPromises = googleTaskLists.map(async (list) => {
+      try {
+        // Fetch unfinished (needsAction) tasks
+        const tasksRes = await fetch(`https://www.googleapis.com/tasks/v1/lists/${list.id}/tasks?showCompleted=false&showDeleted=false&showHidden=false`, {
+          headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+        });
+        
+        if (!tasksRes.ok) return;
+        const tasksData = await tasksRes.json();
+        const items = tasksData.items || [];
+        
+        items.forEach(task => {
+          if (task.title && task.title.trim() !== '') {
+            // Find task link if available, fallback to Google Tasks Web view link
+            let taskLink = null;
+            if (task.links && task.links.length > 0) {
+              taskLink = task.links[0].link; // Grab origin thread link (e.g. Gmail)
+            } else {
+              // Fallback link: Google Tasks on assistant/calendar canvas view
+              taskLink = `https://calendar.google.com/calendar/u/0/r/week?sidebar=tasks`;
+            }
+            
+            allFetchedTasks.push({
+              id: task.id,
+              text: task.title,
+              listId: list.id,
+              listName: list.title,
+              completed: false,
+              due: task.due, // Google task due date
+              notes: task.notes || '', // Fetch notes / details
+              taskLink: taskLink, // Every task now guarantees a link reference
+              updated: new Date(task.updated || 0).getTime()
+            });
+          }
+        });
+      } catch (e) {
+        console.error(`Error loading tasks from list ${list.title}:`, e);
+      }
+    });
+
+    await Promise.all(taskFetchPromises);
+
+    // Classify
+    const overdueList = [];
+    const todayList = [];
+
+    allFetchedTasks.forEach(task => {
+      if (isOverdue(task.due)) {
+        overdueList.push(task);
+      } else if (isToday(task.due)) {
+        todayList.push(task);
+      }
+    });
+
+    // Today Focus is limited to 3 items
+    todayList.sort((a, b) => b.updated - a.updated);
+    overdueList.sort((a, b) => b.updated - a.updated);
+
+    todayTodos = todayList.slice(0, 3);
+    overdueTodos = overdueList;
+    
+    saveTodosLocal();
+    renderTodos();
+  } catch (err) {
+    console.error("syncAllGoogleTasks failed: ", err);
+    throw err;
+  }
+}
+
+function renderTodos() {
+  const containerOverdueSection = document.getElementById('todo-section-overdue');
+  const listOverdue = document.getElementById('todo-list-overdue');
+  const listToday = document.getElementById('todo-list');
+
+  // Render Overdue Section
+  listOverdue.innerHTML = '';
+  if (overdueTodos.length > 0) {
+    containerOverdueSection.classList.remove('hidden');
+    overdueTodos.forEach(todo => {
+      const li = createTodoListItem(todo, 'overdue');
+      listOverdue.appendChild(li);
+    });
+  } else {
+    containerOverdueSection.classList.add('hidden');
+  }
+
+  // Render Today
+  listToday.innerHTML = '';
+  if (todayTodos.length > 0) {
+    todayTodos.forEach(todo => {
+      const li = createTodoListItem(todo, 'today');
+      listToday.appendChild(li);
+    });
+  } else {
+    listToday.innerHTML = `<li style="font-size:0.85rem; color:var(--text-secondary); text-align:center; padding: 24px 0;">NO FOCUS ITEMS TODAY /</li>`;
+  }
+
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+}
+
+function createTodoListItem(todo, sectionClass) {
+  const li = document.createElement('li');
+  li.className = `todo-item ${sectionClass} ${todo.completed ? 'completed' : ''}`;
+  
+  const checkIcon = todo.completed ? '<i data-lucide="check" style="display:block;"></i>' : '<i data-lucide="check"></i>';
+  const listLabel = todo.listName ? `<span class="todo-list-tag">[${escapeHtml(todo.listName)}]</span> ` : '';
+  const cleanText = truncateString(todo.text, 36);
+
+  // Render native origin link icon button if it exists
+  const linkBtnHtml = todo.taskLink ? `
+    <a href="${todo.taskLink}" target="_blank" class="todo-link-btn" onclick="event.stopPropagation();" aria-label="打開來源連結">
+      <i data-lucide="external-link"></i>
+    </a>
+  ` : '';
+
+  // Store whole serialized todo dataset as an attribute for clean popups
+  li.setAttribute('data-todo-json', JSON.stringify(todo));
+
+  li.innerHTML = `
+    <!-- Row 1: Controllers and Text (Perfect alignment column check) -->
+    <div class="todo-item-main-row">
+      <div class="todo-item-left" onclick="showEditorialOverlay(this)">
+        <div class="todo-checkbox" onclick="event.stopPropagation(); toggleTodo('${todo.id}', '${todo.listId}', '${sectionClass}')">
+          ${checkIcon}
+        </div>
+        <div class="todo-item-content">
+          <span class="todo-text">${listLabel}${escapeHtml(cleanText)}</span>
+        </div>
+      </div>
+      <div class="todo-item-right-controls">
+        ${linkBtnHtml}
+      </div>
+    </div>
+  `;
+  return li;
+}
+
+// Kontext.jp Editorial Overlay Popup Builder for Google Calendar Events (Read-only)
+function showCalendarEventOverlay(eventId) {
+  const event = googleEvents.find(e => e.id === eventId);
+  if (!event) {
+    console.warn(`Calendar event with ID [${eventId}] not found in cache.`);
+    return;
+  }
+  
+  try {
+    // Bind overlay DOM components
+    const overlay = document.getElementById('detail-overlay');
+    const metaList = document.getElementById('overlay-meta-list');
+    const metaDate = document.getElementById('overlay-meta-date');
+    const titleText = document.getElementById('overlay-title-text');
+    const bodyContent = document.getElementById('overlay-body-content');
+    const tagsContainer = document.getElementById('overlay-tags-container');
+    const linkBtn = document.getElementById('overlay-link-btn');
+    const editBtn = document.getElementById('overlay-edit-btn');
+
+    // 1. Populate metadata
+    metaList.textContent = (event.calendarName || "CALENDAR").toUpperCase();
+    
+    // 2. Populate date / time span
+    metaDate.textContent = `${event.start} - ${event.end}`;
+
+    // 3. Populate title
+    titleText.textContent = event.title;
+
+    // 4. Populate description, location and creator details (Concatenated strictly in single lines to bypass pre-wrap newlines)
+    let detailsHtml = '';
+    
+    // If location or creator displayName is present, construct a metadata block
+    if (event.location || event.creator) {
+      detailsHtml += `<div class="overlay-calendar-details" style="margin-bottom: 16px; padding-bottom: 12px; border-bottom: 1px dashed var(--border-color); display: flex; flex-direction: column; gap: 8px; font-size: 0.85rem; color: var(--text-secondary); line-height: 1.4; white-space: normal;">`;
+      if (event.location) {
+        detailsHtml += `<div style="display: flex; align-items: flex-start; gap: 10px;"><svg style="width: 14px; height: 14px; margin-top: 3px; flex-shrink: 0; color: var(--text-secondary);" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M12 2a8 8 0 0 0-8 8c0 5.25 8 12 8 12s8-6.75 8-12a8 8 0 0 0-8-8z"></path><circle cx="12" cy="10" r="3"></circle></svg><span style="font-weight: 500; color: var(--text-primary);">${escapeHtml(event.location)}</span></div>`;
+      }
+      if (event.creator) {
+        detailsHtml += `<div style="display: flex; align-items: center; gap: 10px;"><svg style="width: 14px; height: 14px; flex-shrink: 0; color: var(--text-secondary);" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg><span>建立者：<span style="color: var(--text-primary); font-weight: 500;">${escapeHtml(event.creator)}</span></span></div>`;
+      }
+      detailsHtml += `</div>`;
+    }
+    
+    // Append description notes content
+    const cleanedDesc = cleanHtmlDescription(event.description);
+    if (cleanedDesc !== '') {
+      detailsHtml += `<div style="line-height: 1.6; white-space: pre-wrap;">${cleanedDesc}</div>`;
+    } else if (!event.location && !event.creator) {
+      // Display blank info notice if event description/details are completely empty
+      detailsHtml += '<span style="color:var(--text-secondary); font-style:italic;">此行程沒有說明內容。</span>';
+    }
+    
+    bodyContent.innerHTML = detailsHtml;
+    bodyContent.style.display = 'block';
+
+    // 5. Detect and populate hashtags from body content or title (like #SGF)
+    const combinedText = `${event.title} ${event.description || ''}`;
+    const hashtagPattern = /(#[a-zA-Z0-9\u4e00-\u9fa5_]+)/g;
+    const foundTags = combinedText.match(hashtagPattern);
+    
+    if (foundTags && foundTags.length > 0) {
+      const uniqueTags = [...new Set(foundTags)];
+      tagsContainer.textContent = uniqueTags.join(', ');
+      tagsContainer.style.display = 'block';
+    } else {
+      tagsContainer.textContent = '';
+      tagsContainer.style.display = 'none';
+    }
+
+    // 6. Bind External Google Link (points to the specific calendar event)
+    if (event.htmlLink) {
+      linkBtn.href = event.htmlLink;
+      linkBtn.style.display = 'inline-flex';
+    } else {
+      linkBtn.style.display = 'none';
+    }
+
+    // 7. Prevent Calendar edit mode (Calendar items are read-only in this UI)
+    activeOverlayTodo = null; // Clear active todo to prevent edit mode saving
+    overlayIsEditing = false;
+    editBtn.style.display = 'none'; // Hide the Edit button completely
+
+    // Show overlay modal smoothly
+    overlay.classList.remove('hidden');
+  } catch (err) {
+    console.error("Failed to render calendar event data for detail overlay:", err);
+  }
+}
+
+// Kontext.jp Editorial Overlay Popup Builder for Tasks
+function showEditorialOverlay(element) {
+  const item = element.closest('.todo-item');
+  if (!item) return;
+  
+  const todoDataRaw = item.getAttribute('data-todo-json');
+  if (!todoDataRaw) return;
+  
+  try {
+    const todo = JSON.parse(todoDataRaw);
+    
+    // Bind overlay DOM components
+    const overlay = document.getElementById('detail-overlay');
+    const metaList = document.getElementById('overlay-meta-list');
+    const metaDate = document.getElementById('overlay-meta-date');
+    const titleText = document.getElementById('overlay-title-text');
+    const bodyContent = document.getElementById('overlay-body-content');
+    const tagsContainer = document.getElementById('overlay-tags-container');
+    const linkBtn = document.getElementById('overlay-link-btn');
+    const editBtn = document.getElementById('overlay-edit-btn');
+
+    // Ensure the Edit button is visible for Tasks
+    editBtn.style.display = 'inline-flex';
+
+    // 1. Populate metadata (List Name + Custom Folder corners styling)
+    metaList.textContent = (todo.listName || "TASKS").toUpperCase();
+    
+    // 2. Populate date
+    if (todo.due) {
+      const d = new Date(todo.due);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      metaDate.textContent = `${yyyy}.${mm}.${dd}`;
+    } else {
+      metaDate.textContent = "MEMO";
+    }
+
+    // 3. Populate title
+    titleText.textContent = todo.text;
+
+    // 4. Populate Notes Body and convert URLs to anchors
+    if (todo.notes && todo.notes.trim() !== '') {
+      // Escape HTML first
+      let cleanNotes = escapeHtml(todo.notes);
+      // Regex pattern to extract URLs
+      const urlPattern = /(https?:\/\/[^\s]+)/g;
+      cleanNotes = cleanNotes.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
+      bodyContent.innerHTML = cleanNotes;
+      bodyContent.style.display = 'block';
+    } else {
+      bodyContent.innerHTML = '';
+      bodyContent.style.display = 'none';
+    }
+
+    // 5. Detect and populate hashtags from body content or title (like #SGF)
+    const combinedText = `${todo.text} ${todo.notes || ''}`;
+    const hashtagPattern = /(#[a-zA-Z0-9\u4e00-\u9fa5_]+)/g;
+    const foundTags = combinedText.match(hashtagPattern);
+    
+    if (foundTags && foundTags.length > 0) {
+      // Remove duplicates
+      const uniqueTags = [...new Set(foundTags)];
+      tagsContainer.textContent = uniqueTags.join(', ');
+      tagsContainer.style.display = 'block';
+    } else {
+      tagsContainer.textContent = '';
+      tagsContainer.style.display = 'none';
+    }
+
+    // 6. Bind External Google Link
+    if (todo.taskLink) {
+      linkBtn.href = todo.taskLink;
+      linkBtn.style.display = 'inline-flex';
+    } else {
+      linkBtn.style.display = 'none';
+    }
+
+    // Store reference in global state for edits
+    activeOverlayTodo = todo;
+    overlayIsEditing = false;
+    toggleOverlayEditMode(false); // Reset to view mode initially
+
+    // Show overlay modal smoothly
+    overlay.classList.remove('hidden');
+  } catch (err) {
+    console.error("Failed to parse todo data for detail overlay:", err);
+  }
+}
+
+// Switch between view (editorial serif) and edit input/textarea mode
+function toggleOverlayEditMode(isEditing) {
+  overlayIsEditing = isEditing;
+  
+  const titleText = document.getElementById('overlay-title-text');
+  const bodyContent = document.getElementById('overlay-body-content');
+  const editBtn = document.getElementById('overlay-edit-btn');
+  
+  if (!activeOverlayTodo) return;
+  
+  if (isEditing) {
+    // 1. Convert title h2 to clean input form
+    const currentTitle = titleText.textContent;
+    titleText.innerHTML = `<input type="text" id="overlay-edit-title-input" class="overlay-edit-input" value="${escapeHtml(currentTitle)}" aria-label="編輯任務主旨">`;
+    
+    // 2. Convert notes div to textarea form (use raw notes state)
+    const currentNotes = activeOverlayTodo.notes || "";
+    bodyContent.innerHTML = `<textarea id="overlay-edit-notes-textarea" class="overlay-edit-textarea" placeholder="在此輸入備忘說明（可貼上 Google Keep 或其他網址連結）..." aria-label="編輯備忘說明">${escapeHtml(currentNotes)}</textarea>`;
+    bodyContent.style.display = 'block';
+    
+    // 3. Switch Edit button text to Save
+    editBtn.innerHTML = `Save <span class="action-slash">\\</span>`;
+  } else {
+    // Restore View Mode
+    // 1. Re-render title text
+    titleText.innerHTML = escapeHtml(activeOverlayTodo.text);
+    
+    // 2. Re-render notes body with URL link parser
+    if (activeOverlayTodo.notes && activeOverlayTodo.notes.trim() !== '') {
+      let cleanNotes = escapeHtml(activeOverlayTodo.notes);
+      const urlPattern = /(https?:\/\/[^\s]+)/g;
+      cleanNotes = cleanNotes.replace(urlPattern, '<a href="$1" target="_blank">$1</a>');
+      bodyContent.innerHTML = cleanNotes;
+      bodyContent.style.display = 'block';
+    } else {
+      bodyContent.innerHTML = '';
+      bodyContent.style.display = 'none';
+    }
+    
+    // 3. Re-render hashtag tags
+    const tagsContainer = document.getElementById('overlay-tags-container');
+    const combinedText = `${activeOverlayTodo.text} ${activeOverlayTodo.notes || ''}`;
+    const hashtagPattern = /(#[a-zA-Z0-9\u4e00-\u9fa5_]+)/g;
+    const foundTags = combinedText.match(hashtagPattern);
+    
+    if (foundTags && foundTags.length > 0) {
+      const uniqueTags = [...new Set(foundTags)];
+      tagsContainer.textContent = uniqueTags.join(', ');
+      tagsContainer.style.display = 'block';
+    } else {
+      tagsContainer.textContent = '';
+      tagsContainer.style.display = 'none';
+    }
+    
+    // 4. Switch button text back to Edit
+    editBtn.innerHTML = `Edit <span class="action-slash">\\</span>`;
+  }
+}
+
+// Save editorial edits back to Google Tasks and local caches
+async function saveOverlayChanges() {
+  if (!activeOverlayTodo) return;
+  
+  const titleInput = document.getElementById('overlay-edit-title-input');
+  const notesTextarea = document.getElementById('overlay-edit-notes-textarea');
+  
+  if (!titleInput) return;
+  
+  const newTitle = titleInput.value.trim();
+  const newNotes = notesTextarea ? notesTextarea.value.trim() : "";
+  
+  if (!newTitle) {
+    alert("任務名稱不能為空！");
+    return;
+  }
+  
+  // Set UI button to Syncing state
+  const editBtn = document.getElementById('overlay-edit-btn');
+  editBtn.innerHTML = `Syncing <span class="action-slash">\\</span>`;
+  editBtn.disabled = true;
+  
+  // 1. Update global RAM state references
+  activeOverlayTodo.text = newTitle;
+  activeOverlayTodo.notes = newNotes;
+  
+  const updateStateList = (todoList) => {
+    return todoList.map(item => {
+      if (item.id === activeOverlayTodo.id) {
+        return { ...item, text: newTitle, notes: newNotes };
+      }
+      return item;
+    });
+  };
+  
+  todayTodos = updateStateList(todayTodos);
+  overdueTodos = updateStateList(overdueTodos);
+  
+  // 2. Render main dashboard checklist with new labels instantly
+  renderTodos();
+  saveTodosLocal();
+  
+  // 3. Sync PATCH changes back to Google server if authorized
+  if (googleAccessToken && !activeOverlayTodo.id.startsWith('mock-')) {
+    try {
+      const response = await fetch(`https://www.googleapis.com/tasks/v1/lists/${activeOverlayTodo.listId}/tasks/${activeOverlayTodo.id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${googleAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: activeOverlayTodo.id,
+          title: newTitle,
+          notes: newNotes
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error(`Google Tasks Update failed with status: ${response.status}`);
+      }
+      
+      // Pull fresh data in background silently to verify list ordering
+      setTimeout(syncAllGoogleTasks, 800);
+    } catch (err) {
+      console.error("Error writing edits back to Google Tasks:", err);
+      alert("同步至 Google Tasks 失敗，新編輯已保存在本機快取中。");
+    }
+  }
+  
+  // 4. Return to View Mode
+  editBtn.disabled = false;
+  toggleOverlayEditMode(false);
+}
+
+async function toggleTodo(id, listId, sectionClass) {
+  let toggledTask = null;
+  
+  const mapper = (todo) => {
+    if (todo.id === id) {
+      toggledTask = { ...todo, completed: !todo.completed };
+      return toggledTask;
+    }
+    return todo;
+  };
+
+  if (sectionClass === 'overdue') overdueTodos = overdueTodos.map(mapper);
+  else if (sectionClass === 'today') todayTodos = todayTodos.map(mapper);
+
+  renderTodos();
+  saveTodosLocal();
+
+  if (googleAccessToken && toggledTask && !id.startsWith('mock-')) {
+    try {
+      const response = await fetch(`https://www.googleapis.com/tasks/v1/lists/${listId}/tasks/${id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${googleAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          id: id,
+          status: toggledTask.completed ? 'completed' : 'needsAction'
+        })
+      });
+      if (!response.ok) throw new Error("Toggle sync failed.");
+      
+      setTimeout(syncAllGoogleTasks, 800);
+    } catch (err) {
+      console.error(err);
+    }
+  }
+}
+
+function showWarning() {
+  todoWarning.classList.remove('hidden');
+  todoWarning.style.animation = 'none';
+  todoWarning.offsetHeight; 
+  todoWarning.style.animation = null;
+}
+
+function hideWarning() {
+  todoWarning.classList.add('hidden');
+}
+
+function saveTodosLocal() {
+  localStorage.setItem('overdue_todos', JSON.stringify(overdueTodos));
+  localStorage.setItem('today_todos', JSON.stringify(todayTodos));
+}
+
+// 4. Multi-Calendar Explorer & Google Calendar API
+async function syncAllGoogleCalendars() {
+  try {
+    // 1. Fetch list of all subscribed calendars
+    const calendarsRes = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
+      headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+    });
+    
+    if (!calendarsRes.ok) throw new Error("Fetch CalendarList Failed");
+    
+    const calendarsData = await calendarsRes.json();
+    // Use calendars that are selected/visible in UI to avoid cluttering
+    googleCalendarLists = (calendarsData.items || []).filter(c => c.selected !== false);
+
+    if (googleCalendarLists.length === 0) {
+      googleEvents = [];
+      renderTimeline();
+      return;
+    }
+
+    const now = new Date();
+    // Calculate local start and end times formatted as RFC3339 strings with correct offsets
+    const pad = (num) => String(num).padStart(2, '0');
+    
+    // Convert local start of day to offset RFC3339 string (e.g. YYYY-MM-DDT00:00:00+08:00)
+    const tzo = -now.getTimezoneOffset();
+    const dif = tzo >= 0 ? '+' : '-';
+    const offsetStr = `${dif}${pad(Math.floor(Math.abs(tzo) / 60))}:${pad(Math.abs(tzo) % 60)}`;
+    
+    const yyyy = now.getFullYear();
+    const mm = pad(now.getMonth() + 1);
+    const dd = pad(now.getDate());
+    
+    const startOfDay = `${yyyy}-${mm}-${dd}T00:00:00${offsetStr}`;
+    const endOfDay = `${yyyy}-${mm}-${dd}T23:59:59${offsetStr}`;
+
+    let allFetchedEvents = [];
+
+    // 2. Fetch events from all calendars concurrently
+    const eventFetchPromises = googleCalendarLists.map(async (calendar) => {
+      try {
+        const eventsRes = await fetch(
+          `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(calendar.id)}/events?timeMin=${encodeURIComponent(startOfDay)}&timeMax=${encodeURIComponent(endOfDay)}&singleEvents=true&orderBy=startTime`, {
+          headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+        });
+        
+        if (!eventsRes.ok) {
+          const errText = await eventsRes.text();
+          console.warn(`Fetch events failed for calendar [${calendar.summary}] (ID: ${calendar.id}) - Status: ${eventsRes.status}, Error: ${errText}`);
+          return;
+        }
+        const eventsData = await eventsRes.json();
+        const items = eventsData.items || [];
+        
+        items.forEach(event => {
+          if (event.start) {
+            let start = null;
+            let end = null;
+            let isAllDay = false;
+            let timeStr = "";
+
+            // Filter out auto-generated Tasks reminders in Google Calendar to avoid duplication with the left Todo list
+            const summary = event.summary ? event.summary.toLowerCase() : '';
+            if (summary.includes('待處理工作') || summary.includes('task') || summary.includes('待辦工作') || summary.includes('待辦事項')) {
+              return; // Skip Tasks placeholder events
+            }
+
+            if (event.start.dateTime) {
+              start = new Date(event.start.dateTime);
+              end = new Date(event.end.dateTime);
+              
+              const formatTime = (dateObj) => {
+                const hh = String(dateObj.getHours()).padStart(2, '0');
+                const mm = String(dateObj.getMinutes()).padStart(2, '0');
+                return `${hh}:${mm}`;
+              };
+              timeStr = `${formatTime(start)} - ${formatTime(end)}`;
+            } else if (event.start.date) {
+              // All-day event fallback
+              isAllDay = true;
+              timeStr = "ALL DAY";
+              // Sort all-day events to the top of the day
+              start = new Date(event.start.date + 'T00:00:00');
+              end = new Date(event.start.date + 'T23:59:59');
+            }
+
+            if (start && end) {
+              // Categorize by title keywords
+              let type = 'task'; // Default
+              if (summary.includes('break') || summary.includes('運動') || summary.includes('休息') || summary.includes('吃') || summary.includes('跑') || summary.includes('休')) {
+                type = 'break';
+              } else if (summary.includes('plan') || summary.includes('規劃') || summary.includes('研讀') || summary.includes('讀書') || summary.includes('思索') || summary.includes('會議') || summary.includes('meet')) {
+                type = 'planning';
+              }
+              
+              allFetchedEvents.push({
+                id: event.id,
+                calendarId: calendar.id,
+                calendarName: calendar.summary,
+                title: event.summary || "無主旨活動",
+                startTimeObj: start, // for sorting
+                start: timeStr.split(' - ')[0],
+                end: timeStr.split(' - ')[1] || "23:59",
+                isAllDay: isAllDay,
+                type: type,
+                description: event.description || "",
+                htmlLink: event.htmlLink || "",
+                location: event.location || "",
+                creator: event.creator ? (event.creator.displayName || event.creator.email || "") : ""
+              });
+            }
+          }
+        });
+      } catch (e) {
+        console.error(`Error loading calendar events for ${calendar.summary}:`, e);
+      }
+    });
+
+    await Promise.all(eventFetchPromises);
+
+    // Sort combined schedules by chronologic starting time
+    allFetchedEvents.sort((a, b) => a.startTimeObj.getTime() - b.startTimeObj.getTime());
+    
+    googleEvents = allFetchedEvents;
+    renderTimeline();
+  } catch (err) {
+    console.error("syncAllGoogleCalendars failed: ", err);
+    // If permission or calendar API fail specifically, clear cached list to notify user but do not crash tasks sync
+    googleEvents = [];
+    renderTimeline();
+  }
+}
+
+function initTimeline() {
+  // If not logged in, render default mock timeline list
+  if (!googleAccessToken) {
+    googleEvents = [
+      { id: 'm-1', title: "點擊頂部 SYNC 按鈕授權", start: "09:00", end: "10:00", type: "planning" },
+      { id: 'm-2', title: "串接您的 Google 日曆行程", start: "11:00", end: "12:00", type: "task" },
+      { id: 'm-3', title: "享受無雜訊日系網格時間流", start: "14:00", end: "15:00", type: "break" }
+    ];
+  }
+  renderTimeline();
+}
+
+function renderTimeline() {
+  // Clear timeline list
+  timelineEvents.innerHTML = '';
+  
+  // Find or create All-Day Highlights box container inside the panel
+  const panelTimeline = document.getElementById('panel-timeline');
+  let allDayContainer = document.getElementById('timeline-allday-container');
+  
+  if (!allDayContainer) {
+    allDayContainer = document.createElement('div');
+    allDayContainer.id = 'timeline-allday-container';
+    // Insert after subtitle but before the timeline container spine
+    const subtitle = panelTimeline.querySelector('.card-subtitle');
+    subtitle.parentNode.insertBefore(allDayContainer, subtitle.nextSibling);
+  }
+  allDayContainer.innerHTML = '';
+  
+  if (googleEvents.length === 0) {
+    timelineEvents.innerHTML = `
+      <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; padding: 40px 0; letter-spacing: 0.5px;">
+        TODAY HAS NO SCHEDULED EVENTS /
+      </div>
+    `;
+    allDayContainer.style.display = 'none';
+    return;
+  }
+
+  // Group events into allDay highlights vs timed schedule
+  const allDayEvents = googleEvents.filter(e => e.isAllDay);
+  const timedEvents = googleEvents.filter(e => !e.isAllDay);
+
+  // Render All-Day Highlights Block at the top
+  if (allDayEvents.length > 0) {
+    allDayContainer.style.display = 'block';
+    allDayContainer.style.marginBottom = '24px';
+    
+    let highlightsHtml = `
+      <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 10px; letter-spacing: 1px; padding: 0 8px;">ALL-DAY HIGHLIGHTS / 今日摘要</div>
+      <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
+    `;
+    
+    allDayEvents.forEach(event => {
+      const calLabel = event.calendarName && !event.calendarName.includes('@') ? ` <span style="font-size:0.7rem; color:var(--text-secondary); font-weight:400; letter-spacing:0px;">(${escapeHtml(event.calendarName)})</span>` : '';
+      highlightsHtml += `
+        <div style="padding: 12px 16px; border: 1px solid var(--border-color); background-color: rgba(0,0,0,0.01); display: flex; align-items: center; gap: 10px;">
+          <svg style="width: 13px; height: 13px; color: var(--text-secondary); flex-shrink: 0;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="12 6 12 12 16 14"></polygon></svg>
+          <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary); line-height: 1.4;">${escapeHtml(event.title)}${calLabel}</span>
+        </div>
+      `;
+    });
+    
+    highlightsHtml += `</div>`;
+    allDayContainer.innerHTML = highlightsHtml;
+  } else {
+    allDayContainer.style.display = 'none';
+  }
+
+  // Render Timed Events Timeline at the bottom
+  if (timedEvents.length === 0) {
+    timelineEvents.innerHTML = `
+      <div style="text-align: center; color: var(--text-secondary); font-size: 0.85rem; padding: 40px 0; letter-spacing: 0.5px;">
+        NO TIMED EVENTS SCHEDULED TODAY /
+      </div>
+    `;
+    return;
+  }
+
+  // Calculate timeline start & end boundaries based on today's events range
+  const firstStart = parseTimeToMinutes(timedEvents[0].start);
+  const lastEnd = parseTimeToMinutes(timedEvents[timedEvents.length - 1].end);
+  
+  timelineStartMin = Math.max(0, firstStart - 60); // Starts 1 hour before first event
+  const timelineEndMin = Math.min(1439, lastEnd + 60); // Ends 1 hour after last event
+  timelineDurationMins = timelineEndMin - timelineStartMin;
+  
+  // Force the timeline list container to match our scale ruler height and enable absolute positioning
+  timelineEvents.style.position = 'relative';
+  timelineEvents.style.height = `${TIMELINE_HEIGHT}px`;
+
+  // We rewrite index-based alignment to respect only timedEvents index list
+  timedEvents.forEach((event, index) => {
+    const alignment = index % 2 === 0 ? 'align-left' : 'align-right';
+    
+    const cleanTitle = truncateString(event.title, 36);
+    
+    // Compute start top offset and height duration on the physical timeline
+    const startMin = parseTimeToMinutes(event.start);
+    const endMin = parseTimeToMinutes(event.end);
+    
+    const itemTop = ((startMin - timelineStartMin) / timelineDurationMins) * TIMELINE_HEIGHT;
+    const itemHeight = Math.max(45, ((endMin - startMin) / timelineDurationMins) * TIMELINE_HEIGHT); // Ensure a minimum card display height
+    
+    const milestoneItem = document.createElement('div');
+    milestoneItem.className = `timeline-milestone-item ${alignment} type-${event.type}`;
+    milestoneItem.setAttribute('data-start-time', event.start);
+    milestoneItem.setAttribute('data-end-time', event.end);
+    
+    // Apply inline style absolute parameters
+    milestoneItem.style.top = `${itemTop}px`;
+    milestoneItem.style.height = `${itemHeight}px`;
+    
+    milestoneItem.innerHTML = `
+      <div class="milestone-card" onclick="showCalendarEventOverlay('${event.id}')">
+        <span class="milestone-time">${event.start} - ${event.end}</span>
+        <h3 class="milestone-title">
+          ${escapeHtml(cleanTitle)}
+        </h3>
+      </div>
+      <div class="milestone-connector"></div>
+      <div class="spine-time-bar" title="${event.start} - ${event.end}"></div>
+    `;
+    
+    timelineEvents.appendChild(milestoneItem);
+  });
+
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+  
+  updateTimeIndicator();
+}
+
+function updateTimeIndicator() {
+  const now = new Date();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  
+  const milestoneItems = document.querySelectorAll('.timeline-milestone-item');
+  const timedEvents = googleEvents.filter(e => !e.isAllDay);
+  
+  if (milestoneItems.length === 0 || timedEvents.length === 0) {
+    timeSpineIndicator.classList.add('hidden');
+    return;
+  }
+  
+  const listContainer = document.getElementById('timeline-events');
+  const containerOffset = listContainer ? listContainer.offsetTop : 0;
+  
+  // Calculate dynamic position ratio linearly based on the true 24h timeline boundary scale
+  let ratio = (currentMinutes - timelineStartMin) / timelineDurationMins;
+  ratio = Math.max(0, Math.min(1, ratio)); // Clamp between 0% and 100% boundary
+  
+  const indicatorTop = containerOffset + (ratio * TIMELINE_HEIGHT);
+  
+  // Apply position
+  timeSpineIndicator.classList.remove('hidden');
+  timeSpineIndicator.style.top = `${indicatorTop}px`;
+  
+  const hh = String(now.getHours()).padStart(2, '0');
+  const mm = String(now.getMinutes()).padStart(2, '0');
+  spineTimeLabel.textContent = `NOW / ${hh}:${mm}`;
+
+  // Update visually 'past' meetings in DOM
+  milestoneItems.forEach((item, idx) => {
+    const event = timedEvents[idx];
+    if (event) {
+      const endMin = parseTimeToMinutes(event.end);
+      if (currentMinutes > endMin) {
+        item.classList.add('past');
+      } else {
+        item.classList.remove('past');
+      }
+    }
+  });
+}
+
+function cleanHtmlDescription(htmlStr) {
+  if (!htmlStr) return '';
+  let clean = htmlStr.trim();
+  // Strip leading and trailing newlines, backslash-n, and HTML br tags
+  clean = clean.replace(/^(?:\s*<br\s*\/?>\s*|\s*\\n\s*|\s*\n\s*)+/gi, '');
+  clean = clean.replace(/(?:\s*<br\s*\/?>\s*|\s*\\n\s*|\s*\n\s*)+$/gi, '');
+  return clean.trim();
+}
+
+// Helper Utilities
+function parseTimeToMinutes(timeStr) {
+  const [h, m] = timeStr.split(':').map(Number);
+  return h * 60 + m;
+}
+
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str;
+  return div.innerHTML;
+}
+
+function truncateString(str, num) {
+  if (str.length <= num) {
+    return str;
+  }
+  return str.slice(0, num) + '...';
+}

@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>極簡個人儀表板 | Minimal Dashboard</title>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,400..900;1,400..900&family=Noto+Serif+TC:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <!-- Lucide Icons -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <!-- Google Identity Services (GSI) for OAuth 2.0 -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- Stylesheet -->
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="app-container">
+    <!-- Header Area -->
+    <header class="dashboard-header">
+      <div class="header-left">
+        <h1 id="current-date">載入中...</h1>
+        <p class="greeting-message" id="greeting">Hello. Today is a good day to focus.</p>
+      </div>
+      <div class="header-right">
+        <div class="sync-group">
+          <button id="sync-btn" class="sync-btn" aria-label="同步 Google 資料">
+            <span>SYNC</span>
+            <span class="slash"> /</span>
+          </button>
+          <div class="status-badge">
+            <span class="pulse-dot"></span>
+            <span id="current-time-text">00:00</span>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- Dashboard Tab Navigation (Visible on all screens) -->
+    <nav class="dashboard-tabs" id="dashboard-tabs-nav">
+      <button class="tab-btn active" data-target="todo">
+        <i data-lucide="target"></i>
+        <span>今日焦點</span>
+      </button>
+      <button class="tab-btn" data-target="timeline">
+        <i data-lucide="calendar"></i>
+        <span>今日時間軸</span>
+      </button>
+    </nav>
+
+    <!-- Main Grid / Switchable Panels -->
+    <main class="dashboard-grid" id="dashboard-main-grid">
+      
+      <!-- Tab 1: Today's Focus Todo List Panel -->
+      <section id="panel-todo" class="dashboard-card dashboard-panel active-panel">
+        <div class="card-header">
+          <div class="card-title-group">
+            <i data-lucide="compass" class="icon-primary"></i>
+            <h2>手頭的事</h2>
+          </div>
+          <span class="timeline-badge">Tasks</span>
+        </div>
+        <p class="card-subtitle">在繁雜的日常裡，留住當下最核心的專注。</p>
+        
+        <!-- Quick add form -->
+        <form id="todo-form" class="todo-form">
+          <input type="text" id="todo-input" placeholder="新增待辦任務..." required aria-label="待辦輸入">
+          <button type="submit" aria-label="新增">
+            <i data-lucide="plus"></i>
+          </button>
+        </form>
+
+        <div id="todo-warning" class="todo-warning hidden">
+          <i data-lucide="alert-triangle"></i>
+          <span>今日焦點最多僅能設定 3 件事，請專注在最重要的任務上。</span>
+        </div>
+
+        <!-- Section 1: Today's Focus (Non-collapsible to retain focus, placed at the top) -->
+        <div id="todo-section-today" class="todo-group-section">
+          <div class="group-section-title">TODAY'S FOCUS / 今日焦點</div>
+          <ul id="todo-list" class="todo-list"></ul>
+        </div>
+
+        <!-- Section 2: Overdue tasks (Below Today, collapsed by default) -->
+        <div id="todo-section-overdue" class="todo-group-section hidden">
+          <div id="title-overdue" class="group-section-title overdue-title collapsible">
+            <span class="overdue-title-text-group">
+              <i data-lucide="alert-circle" class="overdue-alert-icon"></i>
+              OVERDUE / 過期未完
+            </span>
+          </div>
+          <div id="wrapper-overdue" class="todo-list-wrapper collapsed">
+            <ul id="todo-list-overdue" class="todo-list"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Today's Timeline -->
+      <section class="dashboard-card card-timeline" id="panel-timeline">
+        <div class="card-header">
+          <div class="card-title-group">
+            <i data-lucide="calendar" class="icon-primary"></i>
+            <h2>今日歷歷</h2>
+          </div>
+          <span class="timeline-badge" id="timeline-date">Today</span>
+        </div>
+        <p class="card-subtitle">在時間的河流裡，寫下今天生活過的痕跡。</p>
+
+        <div class="milestone-timeline-container">
+          <!-- The central line that cuts through the cards -->
+          <div class="timeline-central-spine"></div>
+          
+          <!-- Fine horizontal time marker ruler line spanning full width -->
+          <div id="time-spine-indicator" class="time-spine-indicator hidden">
+            <span class="spine-ruler-line"></span>
+            <span class="spine-indicator-time" id="spine-time-label">NOW / 12:00</span>
+          </div>
+          
+          <!-- Container for the alternating milestone event cards -->
+          <div class="timeline-milestones-list" id="timeline-events">
+            <!-- Dynamically populated -->
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Footer Information -->
+    <footer class="dashboard-footer">
+      <p>Minimal Dashboard &copy; 2026. Designed for ultimate focus.</p>
+    </footer>
+  </div>
+
+  <!-- Kontext.jp Editorial Detail Overlay -->
+  <div id="detail-overlay" class="overlay-backdrop hidden">
+    <div class="overlay-card">
+      <!-- Top Metadata Header Section -->
+      <div class="overlay-meta-container">
+        <span class="overlay-meta-list" id="overlay-meta-list">LIST NAME</span>
+        <span class="overlay-meta-date" id="overlay-meta-date">2026.07.10</span>
+      </div>
+
+      <!-- Main Heading Title -->
+      <h2 class="overlay-title-text" id="overlay-title-text">Task main title goes here with comfortable spacing and editorial formatting.</h2>
+
+      <!-- Main Notes Body Content -->
+      <div class="overlay-body-content" id="overlay-body-content">
+        Detailed task descriptions, notes, lists, or custom instructions go here. Plain URLs will be clickable anchors.
+      </div>
+
+      <!-- Bottom Hashtag Badges -->
+      <div class="overlay-tags-container" id="overlay-tags-container">
+        #tag1, #tag2
+      </div>
+
+      <!-- Bottom Action Line Buttons (Read \, Edit \, and Close \) -->
+      <div class="overlay-actions-container">
+        <a href="#" target="_blank" id="overlay-link-btn" class="overlay-action-btn action-link">Link <span class="action-slash">\</span></a>
+        <button id="overlay-edit-btn" class="overlay-action-btn action-edit">Edit <span class="action-slash">\</span></button>
+        <button id="overlay-close-btn" class="overlay-action-btn action-close">Close <span class="action-slash">\</span></button>
+      </div>
+    </div>
+  </div>
+
+  <!-- JavaScript Application -->
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,1215 @@
+:root {
+  /* Color Palette - Original Kontext.jp Warm Paper Aesthetic */
+  --bg-primary: #f6f5f0;      /* Warm Ivory / Sand Paper background */
+  --bg-card: #fbfbfa;         /* Warm milk white card block */
+  --text-primary: #111111;    /* Deep iron black for supreme readability */
+  --text-secondary: #6e6e6a;  /* Cool slate gray (muted editorial) */
+  --text-tertiary: #a8a8a4;   /* Guidelines/borders (higher visibility) */
+  --accent-color: #d0564f;    /* Kontext signature Coral / Terracotta Red */
+  --accent-light: rgba(208, 86, 79, 0.08);
+  --border-color: #111111;    /* High contrast 1px black line */
+  --warning-color: #d0564f;
+  --success-color: #111111;   /* Pure minimal black checkmark */
+  
+  /* Fonts - Editorial serif & sans combination */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-serif: 'Playfair Display', 'Noto Serif TC', serif;
+  
+  /* Layout & Spacing - Sharp geometric corners (No rounded cards) */
+  --border-radius-lg: 0px;    /* Kontext style has 0px sharp corners */
+  --border-radius-md: 0px;
+  --border-radius-sm: 0px;
+  --transition-smooth: all 0.3s cubic-bezier(0.2, 0.8, 0.2, 1);
+  --box-shadow-card: none;    /* Completely flat, no shadows */
+  --box-shadow-hover: none;
+}
+
+/* Global Reset */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  min-height: 100vh;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 80px 24px;
+  /* Light warm ivory radial gradient & subtle grid lines */
+  background-image: 
+    radial-gradient(circle at 50% 0%, #FAF9F6 0%, #f6f5f0 70%),
+    linear-gradient(to right, rgba(17, 17, 17, 0.05) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(17, 17, 17, 0.05) 1px, transparent 1px);
+  background-size: 100% 100%, 45px 45px;
+}
+
+.app-container {
+  width: 100%;
+  max-width: 1050px; /* Expanded from 650px to accommodate clean dual-column layout on desktops */
+  display: flex;
+  flex-direction: column;
+  gap: 0px; /* Connect elements via lines directly */
+  border: 1px solid var(--border-color); /* Main grid boundary box */
+  background-color: var(--bg-card);
+}
+
+/* Header Styles - Divided by vertical & horizontal lines */
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  padding: 32px;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.dashboard-header h1 {
+  font-family: var(--font-serif);
+  font-size: 2.8rem;
+  font-weight: 400; /* Revert English numbers to elegant regular Playfair Display weight */
+  letter-spacing: -0.5px;
+  margin-bottom: 6px;
+  color: var(--text-primary);
+  line-height: 1.1;
+}
+
+.header-day-chinese {
+  font-family: 'Noto Serif TC', serif;
+  font-weight: 700; /* Set Chinese weekdays to a thick, block press aesthetic */
+  margin-left: 4px;
+}
+
+.greeting-message {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 1.5px; /* Spacious editorial text tracking */
+  font-weight: 500;
+}
+
+/* Pulse indicator & Time Badge */
+.sync-group {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.sync-btn {
+  background: none;
+  border: 1px solid var(--border-color);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 1px;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.sync-btn:hover {
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.sync-btn.synced {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.sync-btn.synced:hover {
+  background-color: var(--accent-color);
+  color: var(--bg-primary);
+}
+
+.sync-btn.syncing {
+  opacity: 0.6;
+  cursor: wait;
+}
+
+.status-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background-color: transparent;
+  padding: 8px 16px;
+  border: 1px solid var(--border-color);
+  font-weight: 600;
+  font-size: 0.8rem;
+  letter-spacing: 0.5px;
+}
+
+.pulse-dot {
+  width: 6px;
+  height: 6px;
+  background-color: var(--text-primary); /* Minimal white dot instead of color */
+  border-radius: 50%;
+}
+
+/* Dashboard Layout Grid - Schema A (Dual-column desktop, Tabbed mobile) */
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr)); /* Force strict 50/50 split, prevent long content from shrinking other columns */
+  background-color: transparent;
+  width: 100%;
+}
+
+/* Dividing vertical line between left panel and right panel */
+.dashboard-grid > section:first-child {
+  border-right: 1px solid var(--border-color);
+}
+
+.dashboard-panel {
+  display: block; /* Both panels display concurrently on desktop */
+  background-color: transparent;
+}
+
+.card-timeline {
+  display: block;
+  background-color: transparent;
+}
+
+/* Dashboard Tabs Navigation (Only visible on mobile screens) */
+.dashboard-tabs {
+  display: none; /* Hidden on desktop since columns are shown side-by-side */
+  background-color: transparent;
+  border-bottom: 1px solid var(--border-color);
+  padding: 0;
+  width: 100%;
+}
+
+.tab-btn {
+  flex: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 16px;
+  border: none;
+  background: none;
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  letter-spacing: 1px;
+}
+
+/* Vertical separator line between tabs */
+.tab-btn:first-child {
+  border-right: 1px solid var(--border-color);
+}
+
+.tab-btn.active {
+  background-color: rgba(0, 0, 0, 0.03); /* Soft paper gray tint for active tab on light mode */
+  color: var(--text-primary);
+}
+
+/* Universal Dashboard Card Style - Grid Boxed */
+.dashboard-card {
+  background-color: transparent;
+  padding: 40px 32px; /* Add breathing margins to avoid text crashing on outer container line */
+  border: none; /* Borders are handled by container */
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px; /* Reduced from 24px to pull the subtitle tight under the bottom border line */
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 16px;
+  padding-left: 8px; /* Slightly offset from borders for breathing room */
+  padding-right: 8px;
+}
+
+.card-title-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.card-title-group h2 {
+  font-family: var(--font-serif);
+  font-size: 1.6rem;
+  font-weight: 400;
+  display: flex;
+  align-items: center; /* Guarantee text and primary icon align vertically */
+  gap: 12px;
+}
+
+.icon-primary {
+  width: 20px;
+  height: 20px;
+  color: var(--text-primary);
+  display: inline-block;
+  vertical-align: middle;
+}
+
+.card-subtitle {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin-bottom: 36px; /* Adjusted to keep comfortable spacing below the tightened subtitle */
+  letter-spacing: 0.3px;
+  line-height: 1.6;
+  padding-left: 8px;
+}
+
+/* Left Column: Todo Styling */
+.todo-group-section {
+  margin-bottom: 36px;
+  animation: slideIn 0.3s ease;
+}
+
+.todo-group-section.hidden {
+  display: none !important;
+}
+
+.group-section-title {
+  font-size: 0.8rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  padding: 10px 8px; /* Add internal vertical and horizontal padding to avoid edge crashing */
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer; /* Clickable headers */
+  user-select: none;
+  transition: var(--transition-smooth);
+}
+
+.group-section-title:hover {
+  color: var(--text-primary);
+}
+
+.group-section-title.collapsible::after {
+  content: '[ + ]'; /* Minimal editorial bracket indicator */
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.group-section-title.collapsible.active::after {
+  content: '[ - ]';
+}
+
+.todo-list-wrapper {
+  max-height: 2000px;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.todo-list-wrapper.collapsed {
+  max-height: 0px;
+}
+
+.overdue-title {
+  color: var(--text-primary);
+  background-color: rgba(0, 0, 0, 0.035); /* Subtle warm gray paper badge background strip */
+  padding: 10px 14px; /* Spacious internal padding */
+  border-bottom: 1px solid var(--border-color); /* Retain divider line */
+}
+
+.overdue-title:hover {
+  background-color: rgba(0, 0, 0, 0.06); /* Darker gray strip on hover */
+}
+
+.overdue-title-text-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.overdue-alert-icon {
+  width: 13px;
+  height: 13px;
+  color: var(--text-primary);
+  stroke-width: 2.2px;
+}
+
+/* De-colorize overdue tasks to keep red exclusively for action buttons */
+.todo-item.overdue .todo-text {
+  color: var(--text-primary);
+  opacity: 0.85; /* Slightly muted tone to show it is past due, without using aggressive red */
+}
+
+.todo-item.overdue .todo-checkbox {
+  border-color: var(--border-color);
+}
+
+.todo-counter {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  padding: 2px 8px;
+  letter-spacing: 0px;
+}
+
+.todo-form {
+  display: flex;
+  gap: 0px; /* Seamless inputs connected by thin lines */
+  margin-bottom: 32px;
+}
+
+.todo-form input {
+  flex-grow: 1;
+  height: 48px; /* Fixed height to match button exactly */
+  padding: 0 18px; /* Vertical padding replaced by height control */
+  border: 1px solid var(--border-color);
+  font-size: 0.95rem;
+  outline: none;
+  background-color: transparent;
+  color: var(--text-primary);
+  transition: var(--transition-smooth);
+  box-sizing: border-box; /* Ensure borders are included in height calculation */
+}
+
+.todo-form input:focus {
+  border-color: var(--text-primary);
+}
+
+.todo-form button {
+  background-color: transparent;
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
+  border-left: none; /* Connect to input box seamlessly */
+  width: 48px;
+  height: 48px; /* Matches input height exactly */
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  box-sizing: border-box; /* Ensure borders are included in height calculation */
+}
+
+.todo-form button:hover {
+  background-color: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.todo-list {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.todo-item {
+  display: flex;
+  flex-direction: column; /* Row-to-column layout to allow bottom notes cards */
+  padding: 16px 12px; /* Add extra horizontal breathing margins to keep checklist elements offset from borders */
+  background-color: transparent;
+  border-bottom: 1px solid var(--border-color);
+  transition: var(--transition-smooth);
+  animation: slideIn 0.3s ease;
+}
+
+.todo-item:hover {
+  background-color: rgba(0, 0, 0, 0.01); /* Soft hover on warm paper */
+}
+
+/* Row 1: Controller and Header titles (always aligned) */
+.todo-item-main-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+}
+
+.todo-item-left {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  flex-grow: 1;
+}
+
+.todo-checkbox {
+  width: 18px;
+  height: 18px;
+  border-radius: 0px; /* Square checkboxes for Kontext style */
+  border: 1px solid var(--border-color);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  transition: var(--transition-smooth);
+  background-color: transparent;
+  flex-shrink: 0;
+}
+
+.todo-checkbox svg {
+  width: 12px;
+  height: 12px;
+  color: var(--text-primary);
+  display: none !important; /* Force hide unchecked SVG state */
+}
+
+.todo-item.completed .todo-checkbox {
+  background-color: transparent;
+  border-color: var(--text-primary);
+}
+
+.todo-item.completed .todo-checkbox svg {
+  display: block !important; /* Force display completed SVG state */
+}
+
+.todo-item-content {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-grow: 1;
+}
+
+.todo-text {
+  font-size: 0.9rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  line-height: 1.4;
+  transition: var(--transition-smooth);
+  word-break: break-all; /* Prevent long titles from stretching the task row */
+  overflow-wrap: anywhere;
+}
+
+.todo-list-tag {
+  font-size: 0.75rem;
+  color: var(--text-secondary);
+  font-weight: 400;
+  margin-right: 4px;
+  letter-spacing: 0.5px;
+}
+
+.todo-item.completed .todo-text {
+  color: var(--text-secondary);
+  text-decoration: line-through;
+}
+
+.todo-notes-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition-smooth);
+}
+
+.todo-notes-btn:hover {
+  color: var(--text-primary);
+}
+
+.todo-notes-icon {
+  width: 13px;
+  height: 13px;
+  stroke-width: 1.8px;
+}
+
+.todo-item-right-controls {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.todo-link-btn {
+  color: var(--text-secondary);
+  cursor: pointer;
+  opacity: 0.45; /* Softly visible by default instead of hidden, preventing invisible buttons */
+  transition: var(--transition-smooth);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+}
+
+.todo-link-btn svg {
+  width: 14px;
+  height: 14px;
+}
+
+.todo-link-btn:hover {
+  color: var(--text-primary);
+  opacity: 1;
+}
+
+/* Hover triggers to reveal external link button */
+.todo-item:hover .todo-link-btn {
+  opacity: 1;
+}
+
+/* Make link button active on touch devices since hover is not active */
+@media (max-width: 800px) {
+  .todo-link-btn {
+    opacity: 1 !important;
+  }
+}
+
+/* Underline design styling for links inside notes cards */
+.todo-notes-link {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 500;
+}
+
+.todo-notes-link:hover {
+  opacity: 0.8;
+}
+
+/* Row 2: Collapsible boxed notes details card */
+.todo-notes-box {
+  margin-top: 12px;
+  margin-left: 30px; /* Align perfectly with text start (checkbox width + gap = 30px) */
+  margin-right: 32px; /* Avoid overlapping delete button column */
+  padding: 12px 16px;
+  background-color: rgba(0, 0, 0, 0.015); /* Clean warm gray container */
+  border: 1px solid var(--border-color); /* Strict Kontext grid line box */
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-all; /* Force long URLs or Windows share paths to break lines */
+  overflow-wrap: anywhere; /* Ensure word boundary wrapping anywhere */
+  display: none;
+  animation: slideIn 0.2s ease;
+}
+
+.todo-notes-box.active {
+  display: block;
+}
+
+.todo-warning {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background-color: transparent;
+  color: var(--warning-color);
+  padding: 12px;
+  border: 1px solid var(--warning-color); /* Simple border banner */
+  margin-top: 24px;
+  font-size: 0.8rem;
+  font-weight: 500;
+  animation: shake 0.4s ease;
+}
+
+.todo-warning.hidden {
+  display: none;
+}
+
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  25% { transform: translateX(-4px); }
+  75% { transform: translateX(4px); }
+}
+
+/* Milestone Timeline Container */
+.milestone-timeline-container {
+  position: relative;
+  margin-top: 10px;
+  padding: 30px 10px;
+  background-color: var(--bg-card);
+  min-height: 480px;
+}
+
+/* Central vertical spine line - thin Kontext style */
+.timeline-central-spine {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--border-color);
+  transform: translateX(-50%);
+  z-index: 1;
+}
+
+/* Sliding active time pulse indicator along the spine (Full width horizontal ruler) */
+.time-spine-indicator {
+  position: absolute;
+  left: 0;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 1; /* Drop below the cards layer (z-index 2) so the dashed line gets hidden behind active card blocks */
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  padding: 0;
+}
+
+.time-spine-indicator.hidden {
+  display: none;
+}
+
+.spine-ruler-line {
+  flex-grow: 1;
+  height: 1px;
+  border-top: 1px dashed var(--accent-color); /* Signature coral red dashed ruler line */
+  opacity: 0.6; /* Softer opacity as background marker guide */
+}
+
+.spine-indicator-time {
+  position: absolute;
+  left: 50%;
+  transform: translate(12px, -50%); /* Pin the badge exactly to the right of the center spine, in the safe 10% gap zone */
+  background-color: var(--accent-color); /* Highlight badge matching our signature coral red */
+  color: var(--bg-card); /* Muted warm cream text color */
+  font-size: 0.65rem;
+  font-weight: 700;
+  padding: 3px 6px;
+  border-radius: 0px;
+  white-space: nowrap;
+  letter-spacing: 0.5px;
+  z-index: 3; /* Render badge above background ruler lines but in card-free strip */
+}
+
+/* Timeline Milestones Lists */
+.timeline-milestones-list {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+  z-index: 2;
+}
+
+/* Single Milestone Card Wrapper */
+.timeline-milestone-item {
+  position: absolute; /* Place absolutely on the 24h timeline ruler scale */
+  display: flex;
+  width: 50%; /* Restricted width to 50% to prevent left and right card layers from overlapping and hijacking click events */
+  align-items: center; /* Center the card vertically within its duration block */
+  transition: var(--transition-smooth);
+}
+
+/* Elegant fade out effect for past calendar meetings to emphasize current/future tasks */
+.timeline-milestone-item.past {
+  opacity: 0.65; /* Adjusted from 0.45 to enhance readability on warm paper backgrounds */
+}
+
+.timeline-milestone-item.past:hover {
+  opacity: 0.95; /* Hover back to full visibility if inspecting past records */
+}
+
+/* Alternating Alignment */
+/* Left-aligned card container stays strictly in the left 50% zone */
+.timeline-milestone-item.align-left {
+  left: 0;
+  right: auto;
+  justify-content: flex-start;
+}
+.timeline-milestone-item.align-left .milestone-card {
+  margin-right: 10%; /* Offset card from the spine by 10% container width */
+}
+
+/* Right-aligned card container stays strictly in the right 50% zone */
+.timeline-milestone-item.align-right {
+  left: auto;
+  right: 0;
+  justify-content: flex-end;
+}
+.timeline-milestone-item.align-right .milestone-card {
+  margin-left: 10%; /* Offset card from the spine by 10% container width to prevent it from overlaying the center spine */
+}
+
+/* The card box itself */
+.milestone-card {
+  width: 90%; /* Occupies 90% of the 50% parent width, rendering as 45% of total screen width */
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  border-radius: 0px;
+  padding: 16px 20px;
+  position: relative;
+  z-index: 4; /* Sits cleanly on top of central line nodes */
+  transition: var(--transition-smooth);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Ensure all sub-texts and spans inside the card do not block or swallow parent click events */
+.milestone-card * {
+  pointer-events: none;
+}
+
+.milestone-card:hover {
+  border-color: var(--text-primary);
+}
+
+/* Small connection lines from card to central spine node */
+.milestone-connector {
+  position: absolute;
+  top: 50%;
+  height: 1px;
+  background-color: var(--border-color);
+  z-index: 1;
+  transform: translateY(-50%);
+}
+
+.timeline-milestone-item.align-left .milestone-connector {
+  left: 90%; /* Starts at the right edge of the 90% left card */
+  width: 10%; /* Fills the 10% gap to reach the center spine (100% of the left container) */
+  right: auto;
+}
+
+.timeline-milestone-item.align-right .milestone-connector {
+  left: 0; /* Starts at the center spine (0% of the right container) */
+  width: 10%; /* Fills the 10% gap to reach the right card which begins at 10% */
+  right: auto;
+}
+
+/* Scheme B: Vertical Timebar (indicates event span) on the central spine */
+.spine-time-bar {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 4px; /* Increased default thickness from 2px to 4px */
+  transform: translateX(-50%);
+  z-index: 3;
+  transition: var(--transition-smooth);
+}
+
+.timeline-milestone-item.align-left .spine-time-bar {
+  left: 100%; /* Positioned exactly on the center spine (right edge of left container) */
+}
+
+.timeline-milestone-item.align-right .spine-time-bar {
+  left: 0; /* Positioned exactly on the center spine (left edge of right container) */
+}
+
+/* Top tick boundary marker */
+.spine-time-bar::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 50%;
+  width: 12px; /* Slightly wider tick line for a clear boundary */
+  height: 1px;
+  background-color: inherit;
+  transform: translateX(-50%);
+}
+
+/* Bottom tick boundary marker */
+.spine-time-bar::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 50%;
+  width: 12px;
+  height: 1px;
+  background-color: inherit;
+  transform: translateX(-50%);
+}
+
+/* Event type-specific colors for the vertical timebar */
+.timeline-milestone-item.type-task .spine-time-bar {
+  background-color: var(--text-primary);
+}
+.timeline-milestone-item.type-planning .spine-time-bar {
+  background-color: var(--text-secondary);
+}
+.timeline-milestone-item.type-break .spine-time-bar {
+  background-color: var(--border-color);
+}
+
+/* Hover effect highlights the active vertical timebar */
+.milestone-card:hover ~ .spine-time-bar {
+  width: 8px; /* Expand thickness symmetrically outwards on hover */
+  background-color: var(--accent-color) !important;
+}
+
+/* Type styling */
+.timeline-milestone-item.type-task .milestone-card {
+  border-left: 3px solid var(--text-primary);
+}
+.timeline-milestone-item.type-task .milestone-title { color: var(--text-primary); }
+
+.timeline-milestone-item.type-planning .milestone-card {
+  border-left: 3px solid var(--text-secondary);
+}
+.timeline-milestone-item.type-planning .milestone-title { color: var(--text-primary); }
+
+.timeline-milestone-item.type-break .milestone-card {
+  border-left: 3px solid var(--border-color);
+}
+.timeline-milestone-item.type-break .milestone-title { color: var(--text-primary); }
+
+/* Text details inside milestone card */
+.milestone-time {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+}
+
+.milestone-title {
+  font-size: 1rem;
+  font-weight: 700; /* Bold Noto Serif TC title */
+  line-height: 1.35;
+  word-break: break-word; /* Wrap cleanly */
+  color: var(--text-primary);
+}
+
+.milestone-card-icon {
+  width: 14px;
+  height: 14px;
+  stroke-width: 2.2px;
+  color: var(--text-secondary);
+  margin-top: 3px; /* Nudge down icon to align perfectly with first text line */
+  flex-shrink: 0;
+}
+
+/* Mobile responsive for alternating timeline */
+@media (max-width: 650px) {
+  .timeline-central-spine {
+    left: 20px;
+  }
+  
+  .time-spine-indicator {
+    left: 0;
+    right: 0;
+  }
+  
+  .spine-indicator-time {
+    left: auto;
+    right: 10px;
+    transform: translateY(-50%);
+    z-index: 5; /* Keep it above stacked cards on mobile */
+  }
+  
+  .timeline-milestone-item.align-left,
+  .timeline-milestone-item.align-right {
+    width: 100%;
+    left: 0;
+    right: 0;
+    justify-content: flex-end;
+  }
+  
+  .milestone-card {
+    width: calc(100% - 45px);
+  }
+  
+  .timeline-milestone-item.align-left .milestone-card,
+  .timeline-milestone-item.align-right .milestone-card {
+    margin-left: 0;
+    margin-right: 0;
+  }
+
+  .timeline-milestone-item.align-left .milestone-connector,
+  .timeline-milestone-item.align-right .milestone-connector {
+    left: 20px;
+    right: auto;
+    width: 25px;
+    height: 1px;
+  }
+  
+  .timeline-milestone-item.align-left .spine-time-bar,
+  .timeline-milestone-item.align-right .spine-time-bar,
+  .spine-time-bar {
+    left: 20px;
+    transform: translateX(-50%);
+  }
+}
+
+/* Mobile responsive Layout Overrides (Switch to single column + active tab scheme) */
+@media (max-width: 800px) {
+  .dashboard-grid {
+    grid-template-columns: 1fr; /* Stack vertically */
+  }
+
+  .dashboard-grid > section:first-child {
+    border-right: none; /* Remove middle line */
+  }
+
+  .dashboard-tabs {
+    display: flex; /* Show tab navigation buttons on mobile screens */
+  }
+
+  /* Hide panels that are not currently active on mobile */
+  .dashboard-panel {
+    display: none;
+  }
+
+  .card-timeline {
+    display: none;
+  }
+
+  .dashboard-panel.active-panel {
+    display: block;
+  }
+
+  .card-timeline.active-panel {
+    display: block;
+  }
+  
+  body {
+    padding: 24px 12px; /* Muted spacing padding on mobile views */
+  }
+}
+
+/* Footer Styles */
+.dashboard-footer {
+  text-align: center;
+  padding: 16px 0;
+  border-top: 1px solid var(--border-color);
+}
+
+.dashboard-footer p {
+  font-size: 0.8rem;
+  color: var(--text-tertiary);
+}
+
+/* Kontext.jp Editorial Detail Overlay Styles */
+.overlay-backdrop {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(246, 245, 240, 0.92); /* Rich Warm Ivory background with high opacity */
+  backdrop-filter: blur(8px);
+  z-index: 1000;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 24px;
+  opacity: 1;
+  transition: var(--transition-smooth);
+}
+
+.overlay-backdrop.hidden {
+  display: none !important;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.overlay-card {
+  background-color: var(--bg-card);
+  border: 1px solid var(--border-color);
+  width: 100%;
+  max-width: 680px; /* Comfortably matches standard grid width */
+  padding: 56px 48px;
+  position: relative;
+  box-shadow: none; /* Flat sharp aesthetic */
+  display: flex;
+  flex-direction: column;
+  animation: modalSlideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes modalSlideUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+/* Top Metadata Header with custom L-shaped corner lines */
+.overlay-meta-container {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 32px;
+  font-size: 0.8rem;
+  letter-spacing: 1px;
+}
+
+.overlay-meta-list {
+  font-weight: 700;
+  color: var(--text-primary);
+  position: relative;
+  padding-left: 8px;
+  padding-bottom: 2px;
+}
+
+/* Custom CSS L-shaped corner indicator wrapper */
+.overlay-meta-list::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background-color: var(--border-color);
+}
+
+.overlay-meta-list::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  bottom: 0;
+  width: 14px;
+  height: 1px;
+  background-color: var(--border-color);
+}
+
+.overlay-meta-date {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+/* Heading Typography */
+.overlay-title-text {
+  font-family: var(--font-serif);
+  font-size: 1.85rem;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-primary);
+  margin-bottom: 20px; /* Reduced from 36px to make metadata details align cohesively */
+  letter-spacing: -0.3px;
+  word-break: break-word;
+}
+
+/* Body Content Styling - Loose Editorial line height */
+.overlay-body-content {
+  font-size: 1rem;
+  color: var(--text-primary);
+  line-height: 1.85; /* Spacious readable line height */
+  margin-bottom: 40px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.overlay-body-content a {
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-weight: 600;
+}
+
+.overlay-body-content a:hover {
+  opacity: 0.75;
+}
+
+/* Bottom Tags styling */
+.overlay-tags-container {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.5px;
+  margin-bottom: 48px;
+}
+
+/* Bottom Action Buttons (Read \ and Close \) */
+.overlay-actions-container {
+  display: flex;
+  justify-content: flex-end;
+  gap: 24px;
+  align-items: center;
+}
+
+.overlay-action-btn {
+  background: none;
+  border: none;
+  font-family: var(--font-sans);
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 8px 12px;
+  position: relative;
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  transition: var(--transition-smooth);
+}
+
+/* L-shape folder corners wrapper on action buttons */
+.overlay-action-btn::after {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 1px;
+  background-color: var(--border-color);
+}
+
+.overlay-action-btn::before {
+  content: '';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 1px;
+  height: 14px;
+  background-color: var(--border-color);
+}
+
+.overlay-action-btn:hover {
+  opacity: 0.7;
+}
+
+.action-slash {
+  margin-left: 6px;
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+/* Mobile responsive overlay view */
+@media (max-width: 650px) {
+  .overlay-card {
+    padding: 36px 24px;
+  }
+  
+  .overlay-title-text {
+    font-size: 1.5rem;
+  }
+}
+
+/* Kontext-styled Editor Input and Textarea (Borderless, integrating seamlessly) */
+.overlay-edit-input {
+  width: 100%;
+  font-family: var(--font-serif);
+  font-size: 1.85rem;
+  font-weight: 400;
+  color: var(--text-primary);
+  background-color: rgba(0, 0, 0, 0.015);
+  border: none;
+  border-bottom: 1px solid var(--border-color);
+  padding: 4px 8px;
+  outline: none;
+  letter-spacing: -0.3px;
+  transition: var(--transition-smooth);
+}
+
+.overlay-edit-input:focus {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+.overlay-edit-textarea {
+  width: 100%;
+  min-height: 180px; /* Comfortably tall editing box */
+  font-family: var(--font-sans);
+  font-size: 1rem;
+  color: var(--text-primary);
+  background-color: rgba(0, 0, 0, 0.015);
+  border: 1px solid var(--border-color);
+  padding: 16px;
+  outline: none;
+  line-height: 1.85;
+  resize: vertical;
+  transition: var(--transition-smooth);
+}
+
+.overlay-edit-textarea:focus {
+  background-color: rgba(0, 0, 0, 0.03);
+}
+
+/* Disable buttons when syncing/loading */
+.overlay-action-btn:disabled {
+  opacity: 0.4;
+  cursor: wait;
+}
