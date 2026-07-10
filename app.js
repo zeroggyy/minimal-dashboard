@@ -457,6 +457,12 @@ async function syncAllGoogleTasks() {
       headers: { 'Authorization': `Bearer ${googleAccessToken}` }
     });
     
+    if (listResponse.status === 401) {
+      handleAuthExpired();
+      const err = new Error("Unauthorized (401)");
+      err.status = 401;
+      throw err;
+    }
     if (!listResponse.ok) throw new Error("Fetch TaskLists Failed");
     
     const listsData = await listResponse.json();
@@ -987,6 +993,12 @@ async function syncAllGoogleCalendars() {
       headers: { 'Authorization': `Bearer ${googleAccessToken}` }
     });
     
+    if (calendarsRes.status === 401) {
+      handleAuthExpired();
+      const err = new Error("Unauthorized (401)");
+      err.status = 401;
+      throw err;
+    }
     if (!calendarsRes.ok) throw new Error("Fetch CalendarList Failed");
     
     const calendarsData = await calendarsRes.json();
