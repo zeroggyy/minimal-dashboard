@@ -102,6 +102,7 @@ const syncBtn = document.getElementById('sync-btn');
 let overdueTodos = [];
 let todayTodos = [];
 let backlogTodos = [];
+let selectedBacklogTodoId = null;
 let scratchpadNotes = [];
 let overlayIsEditing = false;
 let activeOverlayTodo = null;
@@ -174,6 +175,14 @@ function initTodoAccordion() {
     overdueTitle.addEventListener('click', () => {
       overdueTitle.classList.toggle('active');
       overdueWrapper.classList.toggle('collapsed');
+    });
+  }
+
+  const rerollButton = document.getElementById('backlog-reroll-btn');
+  if (rerollButton) {
+    rerollButton.addEventListener('click', () => {
+      pickRandomBacklogTodo(true);
+      renderTodos();
     });
   }
 }
@@ -1051,39 +1060,45 @@ async function syncAllGoogleTasks() {
     
     const taskFetchPromises = googleTaskLists.map(async (list) => {
       try {
-        // Fetch unfinished (needsAction) tasks
-        const tasksRes = await fetch(`https://www.googleapis.com/tasks/v1/lists/${list.id}/tasks?showCompleted=false&showDeleted=false&showHidden=false`, {
-          headers: { 'Authorization': `Bearer ${googleAccessToken}` }
-        });
-        
-        if (!tasksRes.ok) return;
-        const tasksData = await tasksRes.json();
-        const items = tasksData.items || [];
-        
-        items.forEach(task => {
-          if (task.title && task.title.trim() !== '') {
-            // Find task link if available, fallback to Google Tasks Web view link
-            let taskLink = null;
-            if (task.links && task.links.length > 0) {
-              taskLink = task.links[0].link; // Grab origin thread link (e.g. Gmail)
-            } else {
-              // Fallback link: Google Tasks on assistant/calendar canvas view
-              taskLink = `https://calendar.google.com/calendar/u/0/r/week?sidebar=tasks`;
+        // Fetch every page of unfinished tasks so the random pool is complete.
+        let pageToken = null;
+        do {
+          const params = new URLSearchParams({
+            showCompleted: 'false',
+            showDeleted: 'false',
+            showHidden: 'false',
+            maxResults: '100'
+          });
+          if (pageToken) params.set('pageToken', pageToken);
+
+          const tasksRes = await fetch(`https://www.googleapis.com/tasks/v1/lists/${encodeURIComponent(list.id)}/tasks?${params}`, {
+            headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+          });
+          if (!tasksRes.ok) return;
+
+          const tasksData = await tasksRes.json();
+          const items = tasksData.items || [];
+          items.forEach(task => {
+            if (task.title && task.title.trim() !== '') {
+              const taskLink = task.links && task.links.length > 0
+                ? task.links[0].link
+                : 'https://calendar.google.com/calendar/u/0/r/week?sidebar=tasks';
+
+              allFetchedTasks.push({
+                id: task.id,
+                text: task.title,
+                listId: list.id,
+                listName: list.title,
+                completed: false,
+                due: task.due,
+                notes: task.notes || '',
+                taskLink,
+                updated: new Date(task.updated || 0).getTime()
+              });
             }
-            
-            allFetchedTasks.push({
-              id: task.id,
-              text: task.title,
-              listId: list.id,
-              listName: list.title,
-              completed: false,
-              due: task.due, // Google task due date
-              notes: task.notes || '', // Fetch notes / details
-              taskLink: taskLink, // Every task now guarantees a link reference
-              updated: new Date(task.updated || 0).getTime()
-            });
-          }
-        });
+          });
+          pageToken = tasksData.nextPageToken || null;
+        } while (pageToken);
       } catch (e) {
         console.error(`Error loading tasks from list ${list.title}:`, e);
       }
@@ -1094,9 +1109,12 @@ async function syncAllGoogleTasks() {
     // Classify
     const overdueList = [];
     const todayList = [];
+    const backlogList = [];
 
     allFetchedTasks.forEach(task => {
-      if (isOverdue(task.due)) {
+      if (!task.due) {
+        backlogList.push(task);
+      } else if (isOverdue(task.due)) {
         overdueList.push(task);
       } else if (isToday(task.due)) {
         todayList.push(task);
@@ -1106,9 +1124,11 @@ async function syncAllGoogleTasks() {
     // Today Focus is limited to 3 items
     todayList.sort((a, b) => b.updated - a.updated);
     overdueList.sort((a, b) => b.updated - a.updated);
+    backlogList.sort((a, b) => b.updated - a.updated);
 
     todayTodos = todayList.slice(0, 3);
     overdueTodos = overdueList;
+    backlogTodos = backlogList;
     
     saveTodosLocal();
     renderTodos();
@@ -1122,6 +1142,9 @@ function renderTodos() {
   const containerOverdueSection = document.getElementById('todo-section-overdue');
   const listOverdue = document.getElementById('todo-list-overdue');
   const listToday = document.getElementById('todo-list');
+  const containerBacklogSection = document.getElementById('todo-section-backlog');
+  const listBacklog = document.getElementById('todo-list-backlog');
+  const backlogCount = document.getElementById('backlog-count');
 
   // Render Overdue Section
   listOverdue.innerHTML = '';
@@ -1146,9 +1169,39 @@ function renderTodos() {
     listToday.innerHTML = `<li style="font-size:0.85rem; color:var(--text-secondary); text-align:center; padding: 24px 0;">NO FOCUS ITEMS TODAY /</li>`;
   }
 
+  // Render one stable random task without a due date.
+  const selectedBacklogTodo = pickRandomBacklogTodo(false);
+  listBacklog.innerHTML = '';
+  if (selectedBacklogTodo) {
+    containerBacklogSection.classList.remove('hidden');
+    backlogCount.textContent = `/ ${backlogTodos.length} 個候選`;
+    listBacklog.appendChild(createTodoListItem(selectedBacklogTodo, 'backlog'));
+  } else {
+    containerBacklogSection.classList.add('hidden');
+    backlogCount.textContent = '';
+  }
+
   if (typeof lucide !== 'undefined') {
     lucide.createIcons();
   }
+}
+
+function pickRandomBacklogTodo(forceNew = false) {
+  const candidates = backlogTodos.filter(todo => !todo.completed);
+  if (candidates.length === 0) {
+    selectedBacklogTodoId = null;
+    return null;
+  }
+
+  const current = candidates.find(todo => todo.id === selectedBacklogTodoId);
+  if (current && !forceNew) return current;
+
+  const pool = forceNew && candidates.length > 1
+    ? candidates.filter(todo => todo.id !== selectedBacklogTodoId)
+    : candidates;
+  const selected = pool[Math.floor(Math.random() * pool.length)];
+  selectedBacklogTodoId = selected.id;
+  return selected;
 }
 
 function createTodoListItem(todo, sectionClass) {
@@ -1463,6 +1516,7 @@ async function saveOverlayChanges() {
   
   todayTodos = updateStateList(todayTodos);
   overdueTodos = updateStateList(overdueTodos);
+  backlogTodos = updateStateList(backlogTodos);
   
   // 2. Render main dashboard checklist with new labels instantly
   renderTodos();
@@ -1514,6 +1568,7 @@ async function toggleTodo(id, listId, sectionClass) {
 
   if (sectionClass === 'overdue') overdueTodos = overdueTodos.map(mapper);
   else if (sectionClass === 'today') todayTodos = todayTodos.map(mapper);
+  else if (sectionClass === 'backlog') backlogTodos = backlogTodos.map(mapper);
 
   renderTodos();
   saveTodosLocal();
@@ -1554,6 +1609,7 @@ function hideWarning() {
 function saveTodosLocal() {
   localStorage.setItem('overdue_todos', JSON.stringify(overdueTodos));
   localStorage.setItem('today_todos', JSON.stringify(todayTodos));
+  localStorage.setItem('backlog_todos', JSON.stringify(backlogTodos));
 }
 
 // 4. Multi-Calendar Explorer & Google Calendar API

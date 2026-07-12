@@ -98,6 +98,23 @@
             <ul id="todo-list-overdue" class="todo-list"></ul>
           </div>
         </div>
+
+        <!-- Section 3: One randomly selected task without a due date -->
+        <div id="todo-section-backlog" class="todo-group-section leisure-section hidden">
+          <div class="group-section-title leisure-title">
+            <span class="leisure-title-text">
+              <i data-lucide="sparkles"></i>
+              有空解決
+              <span id="backlog-count" class="leisure-count"></span>
+            </span>
+            <button id="backlog-reroll-btn" class="leisure-reroll-btn" type="button" aria-label="換一個有空解決的任務">
+              <i data-lucide="refresh-cw"></i>
+              換一個
+            </button>
+          </div>
+          <p class="leisure-subtitle">從尚未設定到期日的任務中，替現在的空檔挑一件。</p>
+          <ul id="todo-list-backlog" class="todo-list"></ul>
+        </div>
       </section>
 
       <!-- Right Column: Today's Timeline -->
