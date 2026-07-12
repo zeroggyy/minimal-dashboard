@@ -64,15 +64,18 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar.events',
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
   'https://www.googleapis.com/auth/tasks',
-  'https://www.googleapis.com/auth/drive.appdata'
+  'https://www.googleapis.com/auth/drive.appdata',
+  'https://www.googleapis.com/auth/spreadsheets.readonly'
 ].join(' ');
 
 // Storage Key for Google Token
 const STORAGE_TOKEN_KEY = 'google_oauth_token';
 const STORAGE_SCOPE_VERSION_KEY = 'google_oauth_scope_version';
-const OAUTH_SCOPE_VERSION = 'calendar-write-v3';
+const OAUTH_SCOPE_VERSION = 'sheets-read-v4';
 const SCRATCHPAD_STORAGE_KEY = 'scratchpad_notes';
 const SCRATCHPAD_DRIVE_FILE_NAME = 'scratchpad.json';
+const SUBSCRIPTION_SETTINGS_KEY = 'subscription_sheet_settings';
+const SUBSCRIPTION_CACHE_KEY = 'subscription_reminder_cache';
 
 // Global variables for Google integration
 let googleAccessToken = null;
@@ -83,6 +86,9 @@ let scratchpadDriveFileId = null;
 let scratchpadSyncTimer = null;
 let scratchpadSyncInProgress = false;
 let scratchpadSyncQueued = false;
+let subscriptionSettings = null;
+let subscriptionReminders = [];
+let subscriptionCacheUpdatedAt = null;
 
 // DOM Elements
 const currentDateEl = document.getElementById('current-date');
@@ -114,6 +120,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTimeline();
   initDashboardTabs();
   initScratchpad();
+  initSubscriptionReminders();
   initGoogleAuth();
   initTodoAccordion();
   
@@ -208,6 +215,313 @@ function initDashboardTabs() {
       }
     });
   });
+}
+
+// Subscription renewal reminders from Google Sheets
+function initSubscriptionReminders() {
+  const settingsForm = document.getElementById('subscription-settings-form');
+  const settingsButton = document.getElementById('subscription-settings-btn');
+  const connectButton = document.getElementById('subscription-connect-btn');
+  const cancelButton = document.getElementById('subscription-settings-cancel');
+  const refreshButton = document.getElementById('subscription-refresh-btn');
+
+  try {
+    const savedSettings = JSON.parse(localStorage.getItem(SUBSCRIPTION_SETTINGS_KEY) || 'null');
+    subscriptionSettings = normalizeSubscriptionSettings(savedSettings);
+    const savedCache = JSON.parse(localStorage.getItem(SUBSCRIPTION_CACHE_KEY) || 'null');
+    if (savedCache && Array.isArray(savedCache.items)) {
+      subscriptionReminders = savedCache.items;
+      subscriptionCacheUpdatedAt = savedCache.updatedAt || null;
+    }
+  } catch (error) {
+    console.warn('Unable to read subscription reminder cache:', error);
+  }
+
+  const openSettings = () => {
+    populateSubscriptionSettingsForm();
+    settingsForm?.classList.remove('hidden');
+  };
+  settingsButton?.addEventListener('click', openSettings);
+  connectButton?.addEventListener('click', openSettings);
+  cancelButton?.addEventListener('click', () => settingsForm?.classList.add('hidden'));
+  refreshButton?.addEventListener('click', () => {
+    if (!googleAccessToken) {
+      authenticateWithGoogle();
+      return;
+    }
+    fetchSubscriptionReminders().catch(error => {
+      console.error('Manual subscription refresh failed:', error);
+      updateSubscriptionStatus('error', '讀取失敗');
+    });
+  });
+
+  settingsForm?.addEventListener('submit', async event => {
+    event.preventDefault();
+    const urlInput = document.getElementById('subscription-sheet-url');
+    const nameInput = document.getElementById('subscription-sheet-name');
+    const errorElement = document.getElementById('subscription-settings-error');
+    const spreadsheetId = extractSpreadsheetId(urlInput.value);
+    const sheetName = nameInput.value.trim();
+
+    if (!spreadsheetId || !sheetName) {
+      showSubscriptionSettingsError('請輸入有效的 Google Sheet 網址與工作表名稱。');
+      return;
+    }
+
+    errorElement?.classList.add('hidden');
+    subscriptionSettings = {
+      spreadsheetId,
+      sheetUrl: urlInput.value.trim(),
+      sheetName,
+      updatedAt: new Date().toISOString()
+    };
+    saveSubscriptionSettingsLocal();
+    renderSubscriptionReminders();
+    scheduleScratchpadDriveSync();
+
+    if (!googleAccessToken) {
+      settingsForm.classList.add('hidden');
+      authenticateWithGoogle();
+      return;
+    }
+
+    try {
+      await fetchSubscriptionReminders();
+      settingsForm.classList.add('hidden');
+    } catch (error) {
+      updateSubscriptionStatus('error', '讀取失敗');
+      showSubscriptionSettingsError(getSubscriptionErrorMessage(error));
+    }
+  });
+
+  renderSubscriptionReminders();
+}
+
+function extractSpreadsheetId(value) {
+  const text = String(value || '').trim();
+  const urlMatch = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9-_]+)/);
+  if (urlMatch) return urlMatch[1];
+  return /^[a-zA-Z0-9-_]{20,}$/.test(text) ? text : null;
+}
+
+function normalizeSubscriptionSettings(settings) {
+  if (!settings || !settings.spreadsheetId || !settings.sheetName) return null;
+  return {
+    spreadsheetId: String(settings.spreadsheetId),
+    sheetUrl: settings.sheetUrl || `https://docs.google.com/spreadsheets/d/${settings.spreadsheetId}/edit`,
+    sheetName: String(settings.sheetName),
+    updatedAt: settings.updatedAt || new Date(0).toISOString()
+  };
+}
+
+function populateSubscriptionSettingsForm() {
+  const urlInput = document.getElementById('subscription-sheet-url');
+  const nameInput = document.getElementById('subscription-sheet-name');
+  if (urlInput) urlInput.value = subscriptionSettings?.sheetUrl || '';
+  if (nameInput) nameInput.value = subscriptionSettings?.sheetName || '訂閱服務';
+  document.getElementById('subscription-settings-error')?.classList.add('hidden');
+}
+
+function saveSubscriptionSettingsLocal() {
+  if (subscriptionSettings) {
+    localStorage.setItem(SUBSCRIPTION_SETTINGS_KEY, JSON.stringify(subscriptionSettings));
+  }
+}
+
+function mergeSubscriptionSettings(remoteSettings) {
+  const remote = normalizeSubscriptionSettings(remoteSettings);
+  if (!remote) return;
+  const localTime = subscriptionSettings ? new Date(subscriptionSettings.updatedAt).getTime() : -1;
+  const remoteTime = new Date(remote.updatedAt).getTime();
+  if (!subscriptionSettings || remoteTime > localTime) {
+    subscriptionSettings = remote;
+    saveSubscriptionSettingsLocal();
+    renderSubscriptionReminders();
+  }
+}
+
+async function fetchSubscriptionReminders() {
+  if (!subscriptionSettings || !googleAccessToken) return;
+  updateSubscriptionStatus('loading', '正在讀取訂閱資料…');
+
+  const escapedSheetName = subscriptionSettings.sheetName.replace(/'/g, "''");
+  const range = encodeURIComponent(`'${escapedSheetName}'`);
+  const response = await fetch(
+    `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(subscriptionSettings.spreadsheetId)}/values/${range}?valueRenderOption=FORMATTED_VALUE`,
+    { headers: { 'Authorization': `Bearer ${googleAccessToken}` } }
+  );
+  await throwForGoogleApiError(response, 'Unable to read subscription sheet');
+  const data = await response.json();
+  subscriptionReminders = parseSubscriptionRows(data.values || []);
+  subscriptionCacheUpdatedAt = new Date().toISOString();
+  localStorage.setItem(SUBSCRIPTION_CACHE_KEY, JSON.stringify({
+    items: subscriptionReminders,
+    updatedAt: subscriptionCacheUpdatedAt
+  }));
+  renderSubscriptionReminders();
+  updateSubscriptionStatus('synced', `更新於 ${formatShortTime(subscriptionCacheUpdatedAt)}`);
+}
+
+function parseSubscriptionRows(values) {
+  if (!Array.isArray(values) || values.length < 1) return [];
+  const normalizeHeader = value => String(value || '')
+    .trim()
+    .replace(/\s+/g, '')
+    .replace(/[（]/g, '(')
+    .replace(/[）]/g, ')');
+  const headers = values[0].map(normalizeHeader);
+  const findColumn = (...names) => headers.findIndex(header => names.includes(header));
+  const columns = {
+    name: findColumn('訂閱項目'),
+    amount: findColumn('台幣換算(自動)', '台幣換算'),
+    payment: findColumn('支付管道'),
+    dueDate: findColumn('下次到期日'),
+    status: findColumn('狀態')
+  };
+  const missing = Object.entries(columns)
+    .filter(([, index]) => index < 0)
+    .map(([key]) => key);
+  if (missing.length > 0) {
+    const error = new Error(`Missing required subscription columns: ${missing.join(', ')}`);
+    error.code = 'MISSING_COLUMNS';
+    throw error;
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return values.slice(1).map((row, rowIndex) => {
+    const status = String(row[columns.status] || '').trim();
+    const dueDate = parseSheetDate(row[columns.dueDate]);
+    if (status !== '使用中' || !dueDate) return null;
+    const daysUntil = Math.round((dueDate.getTime() - today.getTime()) / 86400000);
+    if (daysUntil > 7) return null;
+    return {
+      rowNumber: rowIndex + 2,
+      name: String(row[columns.name] || '').trim() || '未命名訂閱',
+      amount: String(row[columns.amount] || '').trim(),
+      amountValue: parseCurrencyValue(row[columns.amount]),
+      payment: String(row[columns.payment] || '').trim(),
+      dueDate: formatLocalDateInput(dueDate),
+      daysUntil
+    };
+  }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil);
+}
+
+function parseSheetDate(value) {
+  const match = String(value || '').trim().match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function parseCurrencyValue(value) {
+  const number = Number(String(value || '').replace(/[^0-9.-]/g, ''));
+  return Number.isFinite(number) ? number : 0;
+}
+
+function renderSubscriptionReminders() {
+  const list = document.getElementById('subscription-reminder-list');
+  const emptyState = document.getElementById('subscription-empty-state');
+  const summary = document.getElementById('subscription-summary');
+  const sheetLink = document.getElementById('subscription-sheet-link');
+  const refreshButton = document.getElementById('subscription-refresh-btn');
+  if (!list || !emptyState || !summary || !sheetLink || !refreshButton) return;
+
+  list.innerHTML = '';
+  sheetLink.classList.toggle('hidden', !subscriptionSettings);
+  refreshButton.classList.toggle('hidden', !subscriptionSettings);
+  if (subscriptionSettings) sheetLink.href = subscriptionSettings.sheetUrl;
+
+  if (subscriptionReminders.length === 0) {
+    list.classList.add('hidden');
+    emptyState.classList.remove('hidden');
+    emptyState.querySelector('span').textContent = subscriptionSettings
+      ? '未來 7 天沒有即將到期的使用中訂閱。'
+      : '連結 Google Sheet 後，這裡會顯示七日內即將到期的訂閱。';
+    emptyState.querySelector('button').textContent = subscriptionSettings ? '變更資料來源' : '連結試算表';
+    summary.textContent = '';
+  } else {
+    list.classList.remove('hidden');
+    emptyState.classList.add('hidden');
+    const total = subscriptionReminders.reduce((sum, item) => sum + item.amountValue, 0);
+    summary.textContent = `/ ${subscriptionReminders.length} 項 · ${formatTwd(total)}`;
+    subscriptionReminders.forEach(item => list.appendChild(createSubscriptionReminderItem(item)));
+  }
+
+  if (subscriptionSettings && subscriptionCacheUpdatedAt) {
+    updateSubscriptionStatus('synced', `更新於 ${formatShortTime(subscriptionCacheUpdatedAt)}`);
+  } else if (!subscriptionSettings) {
+    updateSubscriptionStatus('idle', '尚未設定資料來源');
+  }
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function createSubscriptionReminderItem(item) {
+  const element = document.createElement('article');
+  element.className = 'subscription-reminder-item';
+  element.dataset.urgency = item.daysUntil < 0
+    ? 'overdue'
+    : item.daysUntil === 0 ? 'today' : item.daysUntil <= 3 ? 'soon' : 'normal';
+
+  const top = document.createElement('div');
+  top.className = 'subscription-item-top';
+  const name = document.createElement('span');
+  name.className = 'subscription-item-name';
+  name.textContent = item.name;
+  name.title = item.name;
+  const countdown = document.createElement('span');
+  countdown.className = 'subscription-item-countdown';
+  countdown.textContent = formatSubscriptionCountdown(item.daysUntil);
+  top.append(name, countdown);
+
+  const meta = document.createElement('div');
+  meta.className = 'subscription-item-meta';
+  const dateText = item.dueDate.replace(/-/g, '.');
+  meta.textContent = [dateText, item.amount, item.payment].filter(Boolean).join(' · ');
+  element.append(top, meta);
+  return element;
+}
+
+function formatSubscriptionCountdown(days) {
+  if (days < 0) return `已逾期 ${Math.abs(days)} 天`;
+  if (days === 0) return '今天到期';
+  if (days === 1) return '明天到期';
+  return `${days} 天後`;
+}
+
+function formatTwd(value) {
+  return new Intl.NumberFormat('zh-TW', {
+    style: 'currency', currency: 'TWD', maximumFractionDigits: 0
+  }).format(value || 0);
+}
+
+function formatShortTime(value) {
+  return new Date(value).toLocaleTimeString('zh-TW', {
+    hour: '2-digit', minute: '2-digit', hour12: false
+  });
+}
+
+function updateSubscriptionStatus(state, message) {
+  const status = document.getElementById('subscription-status');
+  if (!status) return;
+  status.dataset.state = state;
+  status.textContent = message;
+}
+
+function showSubscriptionSettingsError(message) {
+  const errorElement = document.getElementById('subscription-settings-error');
+  if (!errorElement) return;
+  errorElement.textContent = message;
+  errorElement.classList.remove('hidden');
+}
+
+function getSubscriptionErrorMessage(error) {
+  if (error?.code === 'MISSING_COLUMNS') {
+    return '找不到必要欄位，請確認第一列包含：訂閱項目、台幣換算(自動)、支付管道、下次到期日、狀態。';
+  }
+  if (error?.status === 403) return '沒有讀取這張試算表的權限，請確認登入帳號與 OAuth 權限。';
+  if (error?.status === 404) return '找不到試算表或工作表名稱，請檢查網址與名稱。';
+  return '無法讀取試算表，請稍後重試。';
 }
 
 // Scratchpad / Flash Capsule (local-first, no Google sync required)
@@ -641,6 +955,7 @@ async function syncScratchpadWithDrive() {
     }
 
     let remoteNotes = [];
+    let remoteSubscriptionSettings = null;
     if (scratchpadDriveFileId) {
       const response = await fetch(
         `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(scratchpadDriveFileId)}?alt=media`,
@@ -649,9 +964,11 @@ async function syncScratchpadWithDrive() {
       await throwForGoogleApiError(response, 'Unable to download scratchpad data');
       const payload = await response.json();
       remoteNotes = Array.isArray(payload) ? payload : (payload.notes || []);
+      remoteSubscriptionSettings = Array.isArray(payload) ? null : payload.subscriptionSettings;
     }
 
     scratchpadNotes = mergeScratchpadNotes(scratchpadNotes, remoteNotes);
+    mergeSubscriptionSettings(remoteSubscriptionSettings);
     saveScratchpadNotes();
     renderScratchpadNotes();
     scratchpadDriveFileId = await uploadScratchpadToDrive(scratchpadDriveFileId);
@@ -709,9 +1026,10 @@ async function uploadScratchpadToDrive(fileId) {
     ? { name: SCRATCHPAD_DRIVE_FILE_NAME }
     : { name: SCRATCHPAD_DRIVE_FILE_NAME, parents: ['appDataFolder'] };
   const fileContent = JSON.stringify({
-    version: 1,
+    version: 2,
     updatedAt: new Date().toISOString(),
-    notes: scratchpadNotes
+    notes: scratchpadNotes,
+    subscriptionSettings
   });
   const boundary = `scratchpad_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const multipartBody = [
@@ -924,6 +1242,13 @@ async function syncGoogleData() {
       handleAuthExpired();
       return;
     }
+  }
+
+  try {
+    await fetchSubscriptionReminders();
+  } catch (err) {
+    console.error('Syncing subscription reminders failed:', err);
+    updateSubscriptionStatus('error', '無法讀取訂閱資料');
   }
 
   updateSyncButtonState('synced');

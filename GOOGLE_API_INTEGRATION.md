@@ -17,10 +17,11 @@
 
 2. **啟用 API 服務**：
    - 在左側選單選擇「API 和服務」 > 「庫 (Library)」。
-   - 搜尋並啟用以下三個 API：
+   - 搜尋並啟用以下四個 API：
      - **Google Calendar API**
      - **Google Tasks API**
      - **Google Drive API**（用於閃念膠囊跨裝置同步）
+     - **Google Sheets API**（用於讀取訂閱到期提醒資料）
 
 3. **設定 OAuth 同意畫面 (OAuth Consent Screen)**：
    - 選擇「外部 (External)」（或在個人 Workspace 帳號下選擇「內部」）。
@@ -30,6 +31,7 @@
      - `.../auth/calendar.calendarlist.readonly`（讀取可選擇的日曆清單）
      - `.../auth/tasks` (讀取與寫入您的 Tasks 任務)
      - `.../auth/drive.appdata`（只管理此應用程式在 Google Drive 的隱藏資料）
+     - `.../auth/spreadsheets.readonly`（唯讀取指定的訂閱試算表）
    - **測試使用者 (Test Users)**：新增您自己的 Google 帳號（在發布前，只有被列入此處的帳號可以登入）。
 
 4. **建立憑證 (Credentials)**：
@@ -56,7 +58,7 @@
 ### 2. 在 `app.js` 設定授權與資料抓取
 ```javascript
 const CLIENT_ID = '您的_CLIENT_ID.apps.googleusercontent.com';
-const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/drive.appdata';
+const SCOPES = 'https://www.googleapis.com/auth/calendar.events https://www.googleapis.com/auth/calendar.calendarlist.readonly https://www.googleapis.com/auth/tasks https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/spreadsheets.readonly';
 
 let tokenClient;
 let gapiInited = false;

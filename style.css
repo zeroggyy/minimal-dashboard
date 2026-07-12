@@ -196,6 +196,216 @@ body {
   width: 100%;
 }
 
+/* Subscription renewal reminders */
+.subscription-reminder-panel {
+  border-bottom: 1px solid var(--border-color);
+  padding: 18px 8px 20px;
+}
+
+.subscription-reminder-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.subscription-reminder-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-primary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.9px;
+}
+
+.subscription-reminder-heading > svg { width: 14px; height: 14px; }
+
+.subscription-summary {
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+  font-weight: 500;
+  letter-spacing: 0.2px;
+}
+
+.subscription-reminder-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.subscription-status {
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+  letter-spacing: 0.2px;
+}
+
+.subscription-status[data-state="loading"] { color: var(--text-secondary); }
+.subscription-status[data-state="error"] { color: var(--accent-color); }
+
+.subscription-text-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  border-bottom: 1px solid transparent;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.68rem;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.subscription-text-btn:hover { color: var(--text-primary); border-bottom-color: currentColor; }
+.subscription-text-btn svg { width: 11px; height: 11px; }
+
+.subscription-settings-form {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(180px, 0.8fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin-top: 18px;
+  padding: 16px;
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.018);
+}
+
+.subscription-setting-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.subscription-setting-field label {
+  color: var(--text-secondary);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
+.subscription-setting-field input {
+  width: 100%;
+  height: 38px;
+  padding: 0 11px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  font: 0.82rem var(--font-sans);
+  outline: none;
+  box-sizing: border-box;
+}
+
+.subscription-setting-field input:focus { border-color: var(--text-primary); }
+
+.subscription-settings-actions { display: flex; align-items: center; }
+
+.subscription-settings-actions button,
+.subscription-empty-state button {
+  height: 38px;
+  padding: 0 14px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.72rem;
+  cursor: pointer;
+}
+
+.subscription-settings-actions .subscription-settings-save {
+  margin-left: -1px;
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.subscription-settings-error {
+  grid-column: 1 / -1;
+  color: var(--accent-color);
+  font-size: 0.72rem;
+}
+
+.subscription-reminder-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 0;
+  margin-top: 14px;
+  border-top: 1px solid var(--border-color);
+  border-left: 1px solid var(--border-color);
+}
+
+.subscription-reminder-item {
+  min-width: 0;
+  padding: 13px 15px;
+  border-right: 1px solid var(--border-color);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.subscription-reminder-item[data-urgency="soon"],
+.subscription-reminder-item[data-urgency="today"],
+.subscription-reminder-item[data-urgency="overdue"] {
+  border-left: 3px solid var(--accent-color);
+}
+
+.subscription-item-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.subscription-item-name {
+  overflow: hidden;
+  color: var(--text-primary);
+  font-size: 0.82rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.subscription-item-countdown {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-size: 0.7rem;
+}
+
+.subscription-reminder-item[data-urgency="soon"] .subscription-item-countdown,
+.subscription-reminder-item[data-urgency="today"] .subscription-item-countdown,
+.subscription-reminder-item[data-urgency="overdue"] .subscription-item-countdown {
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.subscription-item-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 6px;
+  color: var(--text-tertiary);
+  font-size: 0.68rem;
+}
+
+.subscription-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-top: 14px;
+  color: var(--text-tertiary);
+  font-size: 0.75rem;
+}
+
+@media (max-width: 800px) {
+  .subscription-reminder-panel { padding: 16px 12px; }
+  .subscription-reminder-header { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .subscription-reminder-actions { justify-content: flex-start; }
+  .subscription-settings-form { grid-template-columns: 1fr; }
+  .subscription-reminder-list { grid-template-columns: 1fr; }
+  .subscription-empty-state { align-items: flex-start; flex-direction: column; }
+}
+
 .tab-btn {
   flex: 1;
   display: flex;
@@ -370,10 +580,11 @@ body {
   color: var(--text-primary);
 }
 
-.leisure-title-text svg {
+.leisure-title .leisure-title-text > svg {
   width: 13px;
   height: 13px;
-  color: var(--text-primary);
+  color: var(--text-primary) !important;
+  stroke: var(--text-primary) !important;
   stroke-width: 2.2px;
 }
 

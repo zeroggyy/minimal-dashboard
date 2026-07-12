@@ -53,6 +53,51 @@
       </button>
     </nav>
 
+    <!-- Subscription renewal reminders from a configured Google Sheet -->
+    <section id="subscription-reminder-panel" class="subscription-reminder-panel">
+      <div class="subscription-reminder-header">
+        <div class="subscription-reminder-heading">
+          <i data-lucide="receipt-text"></i>
+          <span>UPCOMING RENEWALS / 即將續訂</span>
+          <span id="subscription-summary" class="subscription-summary"></span>
+        </div>
+        <div class="subscription-reminder-actions">
+          <span id="subscription-status" class="subscription-status">尚未設定資料來源</span>
+          <button id="subscription-refresh-btn" class="subscription-text-btn hidden" type="button">
+            <i data-lucide="refresh-cw"></i>重新整理
+          </button>
+          <a id="subscription-sheet-link" class="subscription-text-btn hidden" href="#" target="_blank" rel="noopener noreferrer">
+            開啟試算表 <i data-lucide="external-link"></i>
+          </a>
+          <button id="subscription-settings-btn" class="subscription-text-btn" type="button">
+            <i data-lucide="settings-2"></i>設定
+          </button>
+        </div>
+      </div>
+
+      <form id="subscription-settings-form" class="subscription-settings-form hidden">
+        <div class="subscription-setting-field subscription-setting-url">
+          <label for="subscription-sheet-url">Google Sheet 網址</label>
+          <input id="subscription-sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." required>
+        </div>
+        <div class="subscription-setting-field">
+          <label for="subscription-sheet-name">工作表名稱</label>
+          <input id="subscription-sheet-name" type="text" placeholder="訂閱服務" required>
+        </div>
+        <div class="subscription-settings-actions">
+          <button id="subscription-settings-cancel" type="button">取消</button>
+          <button class="subscription-settings-save" type="submit">測試連線並儲存</button>
+        </div>
+        <p id="subscription-settings-error" class="subscription-settings-error hidden"></p>
+      </form>
+
+      <div id="subscription-reminder-list" class="subscription-reminder-list"></div>
+      <div id="subscription-empty-state" class="subscription-empty-state">
+        <span>連結 Google Sheet 後，這裡會顯示七日內即將到期的訂閱。</span>
+        <button id="subscription-connect-btn" type="button">連結試算表</button>
+      </div>
+    </section>
+
     <!-- Main Grid / Switchable Panels -->
     <main class="dashboard-grid" id="dashboard-main-grid">
       
