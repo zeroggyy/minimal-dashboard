@@ -364,6 +364,7 @@ async function fetchSubscriptionReminders() {
 
 function parseSubscriptionRows(values) {
   if (!Array.isArray(values) || values.length < 1) return [];
+  const displayHeaders = values[0].map(value => String(value || '').trim());
   const normalizeHeader = value => String(value || '')
     .trim()
     .replace(/\s+/g, '')
@@ -402,7 +403,11 @@ function parseSubscriptionRows(values) {
       amountValue: parseCurrencyValue(row[columns.amount]),
       payment: String(row[columns.payment] || '').trim(),
       dueDate: formatLocalDateInput(dueDate),
-      daysUntil
+      daysUntil,
+      fields: Object.fromEntries(displayHeaders.map((header, index) => [
+        header || `欄位 ${index + 1}`,
+        String(row[index] ?? '').trim()
+      ]))
     };
   }).filter(Boolean).sort((a, b) => a.daysUntil - b.daysUntil);
 }
@@ -459,6 +464,16 @@ function renderSubscriptionReminders() {
 function createSubscriptionReminderItem(item) {
   const element = document.createElement('article');
   element.className = 'subscription-reminder-item';
+  element.setAttribute('role', 'button');
+  element.setAttribute('tabindex', '0');
+  element.setAttribute('aria-label', `查看訂閱詳情：${item.name}`);
+  element.addEventListener('click', () => showSubscriptionOverlay(item.rowNumber));
+  element.addEventListener('keydown', event => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      showSubscriptionOverlay(item.rowNumber);
+    }
+  });
   element.dataset.urgency = item.daysUntil < 0
     ? 'overdue'
     : item.daysUntil === 0 ? 'today' : item.daysUntil <= 3 ? 'soon' : 'normal';
@@ -480,6 +495,61 @@ function createSubscriptionReminderItem(item) {
   meta.textContent = [dateText, item.amount, item.payment].filter(Boolean).join(' · ');
   element.append(top, meta);
   return element;
+}
+
+function showSubscriptionOverlay(rowNumber) {
+  const item = subscriptionReminders.find(reminder => reminder.rowNumber === rowNumber);
+  if (!item) return;
+
+  const overlay = document.getElementById('detail-overlay');
+  const metaList = document.getElementById('overlay-meta-list');
+  const metaDate = document.getElementById('overlay-meta-date');
+  const titleText = document.getElementById('overlay-title-text');
+  const bodyContent = document.getElementById('overlay-body-content');
+  const tagsContainer = document.getElementById('overlay-tags-container');
+  const linkBtn = document.getElementById('overlay-link-btn');
+  const editBtn = document.getElementById('overlay-edit-btn');
+  if (!overlay || !metaList || !metaDate || !titleText || !bodyContent || !tagsContainer || !linkBtn || !editBtn) return;
+
+  activeOverlayTodo = null;
+  overlayIsEditing = false;
+  metaList.textContent = 'SUBSCRIPTION';
+  metaDate.textContent = `${item.dueDate.replace(/-/g, '.')} · ${formatSubscriptionCountdown(item.daysUntil)}`;
+  titleText.textContent = item.name;
+  editBtn.style.display = 'none';
+
+  const fields = item.fields && Object.keys(item.fields).length > 0
+    ? Object.entries(item.fields)
+    : [
+        ['下次到期日', item.dueDate],
+        ['台幣換算(自動)', item.amount],
+        ['支付管道', item.payment]
+      ];
+  const visibleFields = fields.filter(([, value]) => String(value || '').trim() !== '');
+  bodyContent.innerHTML = `
+    <div class="subscription-detail-grid">
+      ${visibleFields.map(([label, value]) => `
+        <div class="subscription-detail-row">
+          <span class="subscription-detail-label">${escapeHtml(label)}</span>
+          <span class="subscription-detail-value">${escapeHtml(String(value))}</span>
+        </div>
+      `).join('')}
+    </div>`;
+  bodyContent.style.display = 'block';
+
+  tagsContainer.textContent = [
+    item.daysUntil < 0 ? 'OVERDUE' : item.daysUntil <= 3 ? 'DUE SOON' : 'UPCOMING',
+    item.payment
+  ].filter(Boolean).join(' / ');
+  tagsContainer.style.display = 'block';
+
+  if (subscriptionSettings?.sheetUrl) {
+    linkBtn.href = subscriptionSettings.sheetUrl;
+    linkBtn.style.display = 'inline-flex';
+  } else {
+    linkBtn.style.display = 'none';
+  }
+  overlay.classList.remove('hidden');
 }
 
 function formatSubscriptionCountdown(days) {
