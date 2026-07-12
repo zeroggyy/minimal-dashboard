@@ -60,16 +60,29 @@ const MOCK_EVENTS = [
 
 // Google OAuth Settings
 const CLIENT_ID = '207400675861-rdrar5tbitmjhouimpktvbpv4q80g4ct.apps.googleusercontent.com';
-const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/tasks';
+const SCOPES = [
+  'https://www.googleapis.com/auth/calendar.events',
+  'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
+  'https://www.googleapis.com/auth/tasks',
+  'https://www.googleapis.com/auth/drive.appdata'
+].join(' ');
 
 // Storage Key for Google Token
 const STORAGE_TOKEN_KEY = 'google_oauth_token';
+const STORAGE_SCOPE_VERSION_KEY = 'google_oauth_scope_version';
+const OAUTH_SCOPE_VERSION = 'calendar-write-v3';
+const SCRATCHPAD_STORAGE_KEY = 'scratchpad_notes';
+const SCRATCHPAD_DRIVE_FILE_NAME = 'scratchpad.json';
 
 // Global variables for Google integration
 let googleAccessToken = null;
 let googleEvents = [];
 let googleTaskLists = []; // Cache list IDs and names
 let googleCalendarLists = []; // Cache calendar IDs and names
+let scratchpadDriveFileId = null;
+let scratchpadSyncTimer = null;
+let scratchpadSyncInProgress = false;
+let scratchpadSyncQueued = false;
 
 // DOM Elements
 const currentDateEl = document.getElementById('current-date');
@@ -89,6 +102,7 @@ const syncBtn = document.getElementById('sync-btn');
 let overdueTodos = [];
 let todayTodos = [];
 let backlogTodos = [];
+let scratchpadNotes = [];
 let overlayIsEditing = false;
 let activeOverlayTodo = null;
 
@@ -98,6 +112,7 @@ document.addEventListener('DOMContentLoaded', () => {
   initTodo();
   initTimeline();
   initDashboardTabs();
+  initScratchpad();
   initGoogleAuth();
   initTodoAccordion();
   
@@ -166,29 +181,564 @@ function initTodoAccordion() {
 // Dashboard Tabs Handler (Global single column)
 function initDashboardTabs() {
   const tabButtons = document.querySelectorAll('.tab-btn');
-  const panelTodo = document.getElementById('panel-todo');
-  const panelTimeline = document.getElementById('panel-timeline');
+  const panels = document.querySelectorAll('.dashboard-panel, .card-timeline');
 
   tabButtons.forEach(button => {
     button.addEventListener('click', () => {
-      // 1. Reset active buttons
       tabButtons.forEach(btn => btn.classList.remove('active'));
-      // 2. Active clicked button
       button.classList.add('active');
 
-      // 3. Switch active panels
       const target = button.getAttribute('data-target');
-      if (target === 'todo') {
-        panelTodo.classList.add('active-panel');
-        panelTimeline.classList.remove('active-panel');
-      } else if (target === 'timeline') {
-        panelTodo.classList.remove('active-panel');
-        panelTimeline.classList.add('active-panel');
-        // Instantly recalculate indicator & layout just in case
+      panels.forEach(panel => {
+        panel.classList.toggle('active-panel', panel.id === `panel-${target}`);
+      });
+
+      if (target === 'timeline') {
+        // Recalculate after the timeline becomes visible on mobile.
         updateTimeIndicator();
       }
     });
   });
+}
+
+// Scratchpad / Flash Capsule (local-first, no Google sync required)
+function initScratchpad() {
+  const form = document.getElementById('scratchpad-form');
+  const input = document.getElementById('scratchpad-input');
+  const list = document.getElementById('scratchpad-list');
+  const retryButton = document.getElementById('scratchpad-sync-retry');
+
+  if (!form || !input || !list) return;
+
+  try {
+    const savedNotes = JSON.parse(localStorage.getItem(SCRATCHPAD_STORAGE_KEY) || '[]');
+    scratchpadNotes = Array.isArray(savedNotes)
+      ? savedNotes.map(normalizeScratchpadNote).filter(Boolean)
+      : [];
+  } catch (error) {
+    console.warn('Unable to read saved scratchpad notes:', error);
+    scratchpadNotes = [];
+  }
+
+  form.addEventListener('submit', (event) => {
+    event.preventDefault();
+    addScratchpadNote(input.value);
+  });
+
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      form.requestSubmit();
+    }
+  });
+
+  list.addEventListener('click', (event) => {
+    const deleteButton = event.target.closest('[data-action="delete-scratchpad-note"]');
+    if (deleteButton) {
+      const deletedAt = new Date().toISOString();
+      scratchpadNotes = scratchpadNotes.map(note => note.id === deleteButton.dataset.noteId
+        ? { ...note, updatedAt: deletedAt, deletedAt }
+        : note);
+      saveScratchpadNotes();
+      renderScratchpadNotes();
+      scheduleScratchpadDriveSync();
+      return;
+    }
+
+    const convertButton = event.target.closest('[data-action="convert-scratchpad-note"]');
+    if (convertButton) {
+      if (!googleAccessToken) {
+        document.getElementById('scratchpad-auth-notice')?.classList.remove('hidden');
+        authenticateWithGoogle();
+        return;
+      }
+      openScratchpadConvertPanel(convertButton.dataset.noteId, convertButton.dataset.convertType);
+      return;
+    }
+
+    const cancelButton = event.target.closest('[data-action="cancel-scratchpad-convert"]');
+    if (cancelButton) {
+      cancelButton.closest('.scratchpad-convert-panel')?.remove();
+    }
+  });
+
+  list.addEventListener('submit', (event) => {
+    const convertForm = event.target.closest('.scratchpad-convert-panel');
+    if (!convertForm) return;
+    event.preventDefault();
+    submitScratchpadConversion(convertForm);
+  });
+
+  if (retryButton) {
+    retryButton.addEventListener('click', () => {
+      if (!googleAccessToken) {
+        authenticateWithGoogle();
+        return;
+      }
+      syncScratchpadWithDrive().catch(error => {
+        console.error('Manual scratchpad sync failed:', error);
+      });
+    });
+  }
+
+  renderScratchpadNotes();
+  updateScratchpadSyncStatus(googleAccessToken ? 'syncing' : 'local');
+}
+
+function addScratchpadNote(rawText) {
+  const input = document.getElementById('scratchpad-input');
+  const text = rawText.trim();
+  if (!text) return;
+
+  scratchpadNotes.unshift({
+    id: typeof crypto !== 'undefined' && crypto.randomUUID
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    text,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    deletedAt: null,
+    convertedTo: null,
+    conversions: []
+  });
+
+  saveScratchpadNotes();
+  renderScratchpadNotes();
+  input.value = '';
+  input.focus();
+  scheduleScratchpadDriveSync();
+}
+
+function saveScratchpadNotes() {
+  localStorage.setItem(SCRATCHPAD_STORAGE_KEY, JSON.stringify(scratchpadNotes));
+}
+
+function renderScratchpadNotes() {
+  const list = document.getElementById('scratchpad-list');
+  const emptyState = document.getElementById('scratchpad-empty');
+  if (!list || !emptyState) return;
+
+  list.innerHTML = '';
+  const visibleNotes = scratchpadNotes.filter(note => !note.deletedAt);
+  emptyState.classList.toggle('hidden', visibleNotes.length > 0);
+
+  visibleNotes
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .forEach(note => {
+    const noteElement = document.createElement('article');
+    noteElement.className = 'scratchpad-note';
+    noteElement.dataset.noteId = note.id;
+
+    const row = document.createElement('div');
+    row.className = 'scratchpad-note-row';
+
+    const content = document.createElement('div');
+    content.className = 'scratchpad-note-content';
+
+    const textElement = document.createElement('div');
+    textElement.className = 'scratchpad-note-text';
+    textElement.textContent = note.text;
+    content.appendChild(textElement);
+
+    if (note.conversions.length > 0) {
+      const conversionMeta = document.createElement('div');
+      conversionMeta.className = 'scratchpad-conversion-meta';
+      note.conversions.forEach(conversion => {
+        const link = document.createElement('a');
+        link.href = conversion.url || '#';
+        link.target = '_blank';
+        link.rel = 'noopener noreferrer';
+        link.textContent = conversion.type === 'task' ? '已加入 Tasks ↗' : '已加入 Calendar ↗';
+        if (!conversion.url) link.removeAttribute('href');
+        conversionMeta.appendChild(link);
+      });
+      content.appendChild(conversionMeta);
+    }
+
+    const actions = document.createElement('div');
+    actions.className = 'scratchpad-note-actions';
+
+    const taskButton = createScratchpadActionButton({
+      noteId: note.id,
+      type: 'task',
+      icon: 'list-checks',
+      label: '加入 Google Tasks',
+      disabled: note.conversions.some(conversion => conversion.type === 'task')
+    });
+
+    const calendarButton = createScratchpadActionButton({
+      noteId: note.id,
+      type: 'calendar',
+      icon: 'calendar-plus',
+      label: '加入 Google Calendar',
+      disabled: note.conversions.some(conversion => conversion.type === 'calendar')
+    });
+
+    const deleteButton = document.createElement('button');
+    deleteButton.type = 'button';
+    deleteButton.className = 'scratchpad-action-btn btn-delete';
+    deleteButton.dataset.action = 'delete-scratchpad-note';
+    deleteButton.dataset.noteId = note.id;
+    deleteButton.setAttribute('aria-label', '刪除閃念');
+    deleteButton.title = '刪除';
+    deleteButton.innerHTML = '<i data-lucide="trash-2"></i>';
+
+    actions.append(taskButton, calendarButton, deleteButton);
+    row.append(content, actions);
+    noteElement.appendChild(row);
+    list.appendChild(noteElement);
+    });
+
+  if (typeof lucide !== 'undefined') {
+    lucide.createIcons();
+  }
+}
+
+function createScratchpadActionButton({ noteId, type, icon, label, disabled }) {
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.className = 'scratchpad-action-btn';
+  button.dataset.action = 'convert-scratchpad-note';
+  button.dataset.noteId = noteId;
+  button.dataset.convertType = type;
+  button.setAttribute('aria-label', label);
+  button.title = label;
+  button.disabled = disabled;
+  button.innerHTML = `<i data-lucide="${icon}"></i>`;
+  return button;
+}
+
+function openScratchpadConvertPanel(noteId, type) {
+  document.querySelectorAll('.scratchpad-convert-panel').forEach(panel => panel.remove());
+  const note = scratchpadNotes.find(item => item.id === noteId && !item.deletedAt);
+  const noteElement = document.querySelector(`.scratchpad-note[data-note-id="${CSS.escape(noteId)}"]`);
+  if (!note || !noteElement) return;
+
+  const today = formatLocalDateInput(new Date());
+  const panel = document.createElement('form');
+  panel.className = 'scratchpad-convert-panel';
+  panel.dataset.noteId = noteId;
+  panel.dataset.convertType = type;
+
+  if (type === 'task') {
+    const taskLists = googleTaskLists.length > 0
+      ? googleTaskLists
+      : [{ id: '@default', title: 'My Tasks' }];
+    panel.innerHTML = `
+      <div class="convert-panel-type"><i data-lucide="list-checks"></i>轉成 Google Task</div>
+      <div class="convert-field"><label>任務名稱</label><input name="title" value="${escapeHtml(note.text)}" required></div>
+      <div class="convert-field"><label>到期日（選填）</label><input name="date" type="date" value=""></div>
+      <div class="convert-field"><label>任務清單</label><select name="destination">${taskLists.map(list => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.title)}</option>`).join('')}</select></div>
+      <div class="convert-panel-actions">
+        <button class="convert-cancel-btn" data-action="cancel-scratchpad-convert" type="button">取消</button>
+        <button class="convert-confirm-btn" type="submit">加入 Tasks</button>
+      </div>`;
+  } else {
+    const writableCalendars = googleCalendarLists.filter(calendar =>
+      calendar.accessRole === 'owner' || calendar.accessRole === 'writer'
+    );
+    const calendars = writableCalendars.length > 0
+      ? writableCalendars
+      : [{ id: 'primary', summary: '主要日曆' }];
+    const startHour = String(Math.min(22, new Date().getHours() + 1)).padStart(2, '0');
+    const endHour = String(Math.min(23, Number(startHour) + 1)).padStart(2, '0');
+    panel.innerHTML = `
+      <div class="convert-panel-type"><i data-lucide="calendar-plus"></i>轉成 Google Calendar 行程</div>
+      <div class="convert-field"><label>行程名稱</label><input name="title" value="${escapeHtml(note.text)}" required></div>
+      <div class="convert-field"><label>日期</label><input name="date" type="date" value="${today}" required></div>
+      <div class="convert-time-row">
+        <div class="convert-field"><label>開始</label><input name="startTime" type="time" value="${startHour}:00" required></div>
+        <div class="convert-field"><label>結束</label><input name="endTime" type="time" value="${endHour}:00" required></div>
+      </div>
+      <div class="convert-field"><label>地址（選填）</label><input name="location" type="text" placeholder="加入地點或地址"></div>
+      <div class="convert-field"><label>詳細資訊（選填）</label><textarea name="description" rows="3" placeholder="加入說明、連結或備註">${escapeHtml(note.text)}</textarea></div>
+      <div class="convert-field"><label>日曆</label><select name="destination">${calendars.map(calendar => `<option value="${escapeHtml(calendar.id)}">${escapeHtml(calendar.summary)}</option>`).join('')}</select></div>
+      <div class="convert-panel-actions">
+        <button class="convert-cancel-btn" data-action="cancel-scratchpad-convert" type="button">取消</button>
+        <button class="convert-confirm-btn" type="submit">加入 Calendar</button>
+      </div>`;
+  }
+
+  noteElement.appendChild(panel);
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+async function submitScratchpadConversion(form) {
+  if (!googleAccessToken) {
+    authenticateWithGoogle();
+    return;
+  }
+
+  const note = scratchpadNotes.find(item => item.id === form.dataset.noteId);
+  if (!note) return;
+  const type = form.dataset.convertType;
+  const title = form.elements.namedItem('title').value.trim();
+  const date = form.elements.namedItem('date').value;
+  const destination = form.elements.namedItem('destination').value;
+  const submitButton = form.querySelector('.convert-confirm-btn');
+  if (!title || !destination || !submitButton) return;
+
+  submitButton.disabled = true;
+  submitButton.textContent = '處理中…';
+  form.closest('.scratchpad-note')?.classList.add('sending');
+
+  try {
+    let conversion;
+    if (type === 'task') {
+      const taskPayload = {
+        title,
+        notes: `來自閃念膠囊：${note.text}`
+      };
+      if (date) {
+        taskPayload.due = new Date(`${date}T00:00:00`).toISOString();
+      }
+      const response = await fetch(`https://www.googleapis.com/tasks/v1/lists/${encodeURIComponent(destination)}/tasks`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(taskPayload)
+      });
+      await throwForGoogleApiError(response, 'Unable to create Google Task');
+      const task = await response.json();
+      conversion = {
+        type: 'task',
+        id: task.id,
+        url: task.webViewLink || 'https://calendar.google.com/calendar/u/0/r/week?sidebar=tasks',
+        convertedAt: new Date().toISOString()
+      };
+    } else {
+      const startTime = form.elements.namedItem('startTime').value;
+      const endTime = form.elements.namedItem('endTime').value;
+      const location = form.elements.namedItem('location').value.trim();
+      const description = form.elements.namedItem('description').value.trim();
+      const start = new Date(`${date}T${startTime}:00`);
+      let end = new Date(`${date}T${endTime}:00`);
+      if (end <= start) end = new Date(start.getTime() + 60 * 60 * 1000);
+
+      const response = await fetch(`https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(destination)}/events`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${googleAccessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          summary: title,
+          description,
+          location,
+          start: { dateTime: start.toISOString() },
+          end: { dateTime: end.toISOString() }
+        })
+      });
+      await throwForGoogleApiError(response, 'Unable to create Google Calendar event');
+      const event = await response.json();
+      conversion = {
+        type: 'calendar',
+        id: event.id,
+        url: event.htmlLink || '',
+        convertedAt: new Date().toISOString()
+      };
+    }
+
+    const updatedAt = new Date().toISOString();
+    scratchpadNotes = scratchpadNotes.map(item => item.id === note.id
+      ? { ...item, updatedAt, conversions: [...item.conversions, conversion] }
+      : item);
+    saveScratchpadNotes();
+    renderScratchpadNotes();
+    scheduleScratchpadDriveSync();
+  } catch (error) {
+    console.error('Scratchpad conversion failed:', error);
+    submitButton.disabled = false;
+    submitButton.textContent = type === 'task' ? '加入 Tasks' : '加入 Calendar';
+    form.closest('.scratchpad-note')?.classList.remove('sending');
+    alert(type === 'task' ? '無法加入 Google Tasks，請稍後重試。' : '無法加入 Google Calendar，請稍後重試。');
+  }
+}
+
+function formatLocalDateInput(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, '0');
+  const dd = String(date.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function normalizeScratchpadNote(note) {
+  if (!note || typeof note !== 'object' || !note.id || typeof note.text !== 'string') {
+    return null;
+  }
+
+  const createdAt = note.createdAt || new Date().toISOString();
+  return {
+    id: String(note.id),
+    text: note.text,
+    createdAt,
+    updatedAt: note.updatedAt || createdAt,
+    deletedAt: note.deletedAt || null,
+    convertedTo: note.convertedTo || null,
+    conversions: Array.isArray(note.conversions)
+      ? note.conversions
+      : (note.convertedTo ? [note.convertedTo] : [])
+  };
+}
+
+function mergeScratchpadNotes(localNotes, remoteNotes) {
+  const mergedById = new Map();
+
+  [...localNotes, ...remoteNotes]
+    .map(normalizeScratchpadNote)
+    .filter(Boolean)
+    .forEach(note => {
+      const existing = mergedById.get(note.id);
+      const noteUpdatedAt = new Date(note.updatedAt).getTime();
+      const existingUpdatedAt = existing ? new Date(existing.updatedAt).getTime() : -1;
+      if (!existing || noteUpdatedAt >= existingUpdatedAt) {
+        mergedById.set(note.id, note);
+      }
+    });
+
+  return Array.from(mergedById.values());
+}
+
+function scheduleScratchpadDriveSync() {
+  if (!googleAccessToken) {
+    updateScratchpadSyncStatus('local');
+    return;
+  }
+  updateScratchpadSyncStatus('syncing');
+  clearTimeout(scratchpadSyncTimer);
+  scratchpadSyncTimer = setTimeout(() => syncScratchpadWithDrive().catch(error => {
+    console.error('Background scratchpad sync failed:', error);
+  }), 700);
+}
+
+async function syncScratchpadWithDrive() {
+  if (!googleAccessToken) {
+    updateScratchpadSyncStatus('local');
+    return;
+  }
+
+  if (scratchpadSyncInProgress) {
+    scratchpadSyncQueued = true;
+    return;
+  }
+
+  scratchpadSyncInProgress = true;
+  updateScratchpadSyncStatus('syncing');
+  try {
+    if (!scratchpadDriveFileId) {
+      scratchpadDriveFileId = await findScratchpadDriveFile();
+    }
+
+    let remoteNotes = [];
+    if (scratchpadDriveFileId) {
+      const response = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(scratchpadDriveFileId)}?alt=media`,
+        { headers: { 'Authorization': `Bearer ${googleAccessToken}` } }
+      );
+      await throwForGoogleApiError(response, 'Unable to download scratchpad data');
+      const payload = await response.json();
+      remoteNotes = Array.isArray(payload) ? payload : (payload.notes || []);
+    }
+
+    scratchpadNotes = mergeScratchpadNotes(scratchpadNotes, remoteNotes);
+    saveScratchpadNotes();
+    renderScratchpadNotes();
+    scratchpadDriveFileId = await uploadScratchpadToDrive(scratchpadDriveFileId);
+    updateScratchpadSyncStatus('synced', new Date());
+  } catch (error) {
+    updateScratchpadSyncStatus('error');
+    throw error;
+  } finally {
+    scratchpadSyncInProgress = false;
+    if (scratchpadSyncQueued) {
+      scratchpadSyncQueued = false;
+      scheduleScratchpadDriveSync();
+    }
+  }
+}
+
+function updateScratchpadSyncStatus(state, syncedAt = null) {
+  const status = document.getElementById('scratchpad-sync-status');
+  const text = document.getElementById('scratchpad-sync-text');
+  const retryButton = document.getElementById('scratchpad-sync-retry');
+  if (!status || !text || !retryButton) return;
+
+  const labels = {
+    local: '僅本機',
+    syncing: '正在同步…',
+    error: '同步失敗'
+  };
+
+  status.dataset.state = state;
+  if (state === 'synced' && syncedAt) {
+    text.textContent = `已同步至 Google Drive · ${syncedAt.toLocaleTimeString('zh-TW', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false
+    })}`;
+  } else {
+    text.textContent = labels[state] || labels.local;
+  }
+  retryButton.classList.toggle('hidden', state !== 'error');
+}
+
+async function findScratchpadDriveFile() {
+  const query = encodeURIComponent(`name = '${SCRATCHPAD_DRIVE_FILE_NAME}' and 'appDataFolder' in parents`);
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=${query}&orderBy=modifiedTime%20desc&pageSize=1&fields=files(id,name,modifiedTime)`,
+    { headers: { 'Authorization': `Bearer ${googleAccessToken}` } }
+  );
+  await throwForGoogleApiError(response, 'Unable to find scratchpad data');
+  const data = await response.json();
+  return data.files && data.files.length > 0 ? data.files[0].id : null;
+}
+
+async function uploadScratchpadToDrive(fileId) {
+  const metadata = fileId
+    ? { name: SCRATCHPAD_DRIVE_FILE_NAME }
+    : { name: SCRATCHPAD_DRIVE_FILE_NAME, parents: ['appDataFolder'] };
+  const fileContent = JSON.stringify({
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    notes: scratchpadNotes
+  });
+  const boundary = `scratchpad_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const multipartBody = [
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    JSON.stringify(metadata),
+    `--${boundary}`,
+    'Content-Type: application/json; charset=UTF-8',
+    '',
+    fileContent,
+    `--${boundary}--`,
+    ''
+  ].join('\r\n');
+
+  const endpoint = fileId
+    ? `https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id`
+    : 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id';
+  const response = await fetch(endpoint, {
+    method: fileId ? 'PATCH' : 'POST',
+    headers: {
+      'Authorization': `Bearer ${googleAccessToken}`,
+      'Content-Type': `multipart/related; boundary=${boundary}`
+    },
+    body: multipartBody
+  });
+  await throwForGoogleApiError(response, 'Unable to upload scratchpad data');
+  const data = await response.json();
+  return data.id;
+}
+
+async function throwForGoogleApiError(response, message) {
+  if (response.ok) return;
+  const error = new Error(`${message} (${response.status})`);
+  error.status = response.status;
+  throw error;
 }
 
 // 1. Date and Time Init
@@ -251,10 +801,14 @@ const TIMELINE_HEIGHT = 700; // 700px physical scale ruler height
 function initGoogleAuth() {
   // Check if we already have a token stored in session storage (lasts until tab close)
   const savedToken = sessionStorage.getItem(STORAGE_TOKEN_KEY);
-  if (savedToken) {
+  const savedScopeVersion = sessionStorage.getItem(STORAGE_SCOPE_VERSION_KEY);
+  if (savedToken && savedScopeVersion === OAUTH_SCOPE_VERSION) {
     googleAccessToken = savedToken;
     updateSyncButtonState('synced');
     syncGoogleData();
+  } else if (savedToken) {
+    sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+    sessionStorage.removeItem(STORAGE_SCOPE_VERSION_KEY);
   }
 
   // Bind click event to Sync button
@@ -291,6 +845,8 @@ function authenticateWithGoogle() {
         // Save token to session and global state
         googleAccessToken = tokenResponse.access_token;
         sessionStorage.setItem(STORAGE_TOKEN_KEY, googleAccessToken);
+        sessionStorage.setItem(STORAGE_SCOPE_VERSION_KEY, OAUTH_SCOPE_VERSION);
+        document.getElementById('scratchpad-auth-notice')?.classList.add('hidden');
         
         updateSyncButtonState('synced');
         syncGoogleData();
@@ -327,6 +883,7 @@ function updateSyncButtonState(state) {
 // Global data synchronization coordinator
 async function syncGoogleData() {
   if (!googleAccessToken) return;
+  document.getElementById('scratchpad-auth-notice')?.classList.add('hidden');
   updateSyncButtonState('syncing');
   
   // Decouple task and calendar synchronization to prevent one failing service from crashing the other
@@ -350,13 +907,27 @@ async function syncGoogleData() {
     }
   }
 
+  try {
+    await syncScratchpadWithDrive();
+  } catch (err) {
+    console.error('Syncing scratchpad with Google Drive failed:', err);
+    if (err.status === 401) {
+      handleAuthExpired();
+      return;
+    }
+  }
+
   updateSyncButtonState('synced');
 }
 
 function handleAuthExpired() {
   googleAccessToken = null;
+  scratchpadDriveFileId = null;
   sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+  sessionStorage.removeItem(STORAGE_SCOPE_VERSION_KEY);
   updateSyncButtonState('idle');
+  updateScratchpadSyncStatus('local');
+  document.getElementById('scratchpad-auth-notice')?.classList.remove('hidden');
 }
 
 // Helper to determine if a date string is in the past (overdue)

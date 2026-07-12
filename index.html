@@ -47,6 +47,10 @@
         <i data-lucide="calendar"></i>
         <span>今日時間軸</span>
       </button>
+      <button class="tab-btn" data-target="scratchpad">
+        <i data-lucide="feather"></i>
+        <span>閃念膠囊</span>
+      </button>
     </nav>
 
     <!-- Main Grid / Switchable Panels -->
@@ -121,6 +125,58 @@
           <div class="timeline-milestones-list" id="timeline-events">
             <!-- Dynamically populated -->
           </div>
+        </div>
+      </section>
+
+      <!-- Tab 3: Scratchpad / Intention Capture Panel -->
+      <section id="panel-scratchpad" class="dashboard-card dashboard-panel">
+        <div class="card-header">
+          <div class="card-title-group">
+            <i data-lucide="feather" class="icon-primary"></i>
+            <h2>閃念膠囊</h2>
+          </div>
+          <span class="timeline-badge">Capture</span>
+        </div>
+        <p class="card-subtitle">當靈感乍現，先記下來。再決定它是一件事，還是一段時光。</p>
+
+        <!-- Input Area -->
+        <form id="scratchpad-form" class="scratchpad-form">
+          <textarea
+            id="scratchpad-input"
+            class="scratchpad-textarea"
+            placeholder="輸入你的閃念、臨時備忘、或任何想法... 按 Enter 送出"
+            rows="2"
+            aria-label="閃念輸入"
+          ></textarea>
+          <button type="submit" class="scratchpad-submit-btn" aria-label="新增閃念">
+            <i data-lucide="plus"></i>
+          </button>
+        </form>
+
+        <!-- Auth notice (shown when not logged in) -->
+        <div id="scratchpad-auth-notice" class="scratchpad-auth-notice hidden">
+          <i data-lucide="info"></i>
+          <span>轉換功能需先點擊頂部 <strong>SYNC</strong> 登入 Google，才能同步至 Tasks 或 Calendar。</span>
+        </div>
+
+        <div id="scratchpad-sync-status" class="scratchpad-sync-status" data-state="local" aria-live="polite">
+          <span class="scratchpad-sync-dot" aria-hidden="true"></span>
+          <span id="scratchpad-sync-text">僅本機</span>
+          <button id="scratchpad-sync-retry" class="scratchpad-sync-retry hidden" type="button">重試</button>
+        </div>
+
+        <!-- Notes list -->
+        <div id="scratchpad-list" class="scratchpad-list">
+          <!-- Dynamically populated -->
+        </div>
+
+        <!-- Empty state -->
+        <div id="scratchpad-empty" class="scratchpad-empty hidden">
+          <svg width="36" height="36" fill="none" stroke="currentColor" stroke-width="1.2" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+            <path stroke-linecap="round" stroke-linejoin="round" d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+          <p>目前沒有任何閃念。<br>輸入框裡隨手記下你的第一個想法吧。</p>
         </div>
       </section>
 
