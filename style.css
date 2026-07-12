@@ -356,10 +356,12 @@ body {
 
 .leisure-title {
   cursor: default;
-  padding-left: 12px;
-  padding-right: 8px;
-  background: rgba(0, 0, 0, 0.018);
+  padding: 10px 14px;
+  background-color: rgba(0, 0, 0, 0.035);
+  border-bottom: 1px solid var(--border-color);
 }
+
+.leisure-title:hover { background-color: rgba(0, 0, 0, 0.06); }
 
 .leisure-title-text {
   display: flex;
@@ -371,7 +373,8 @@ body {
 .leisure-title-text svg {
   width: 13px;
   height: 13px;
-  color: var(--accent-color);
+  color: var(--text-primary);
+  stroke-width: 2.2px;
 }
 
 .leisure-count {
