@@ -199,27 +199,25 @@ body {
 /* Subscription renewal reminders */
 .subscription-reminder-panel {
   border-bottom: 1px solid var(--border-color);
-  padding: 18px 8px 20px;
 }
 
-.subscription-reminder-header {
+.subscription-reminder-panel .card-subtitle {
+  margin-bottom: 14px;
+}
+
+.subscription-toolbar {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 20px;
+  padding: 0 8px 12px;
 }
 
-.subscription-reminder-heading {
+.subscription-toolbar-meta {
   display: flex;
   align-items: center;
   gap: 8px;
-  color: var(--text-primary);
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.9px;
 }
-
-.subscription-reminder-heading > svg { width: 14px; height: 14px; }
 
 .subscription-summary {
   color: var(--text-tertiary);
@@ -328,18 +326,15 @@ body {
 }
 
 .subscription-reminder-list {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 0;
-  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  margin-top: 0;
   border-top: 1px solid var(--border-color);
-  border-left: 1px solid var(--border-color);
 }
 
 .subscription-reminder-item {
   min-width: 0;
-  padding: 13px 15px;
-  border-right: 1px solid var(--border-color);
+  padding: 14px 8px;
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
   transition: background-color 0.18s ease;
@@ -401,6 +396,12 @@ body {
   border-top: 1px solid var(--border-color);
 }
 
+.overlay-body-content.subscription-overlay-body {
+  white-space: normal;
+  line-height: 1.55;
+  margin-bottom: 28px;
+}
+
 .subscription-detail-row {
   display: grid;
   grid-template-columns: minmax(120px, 0.36fr) minmax(0, 1fr);
@@ -439,8 +440,8 @@ body {
 }
 
 @media (max-width: 800px) {
-  .subscription-reminder-panel { padding: 16px 12px; }
-  .subscription-reminder-header { align-items: flex-start; flex-direction: column; gap: 10px; }
+  .subscription-reminder-panel { padding: 32px 20px; }
+  .subscription-toolbar { align-items: flex-start; flex-direction: column; gap: 10px; }
   .subscription-reminder-actions { justify-content: flex-start; }
   .subscription-settings-form { grid-template-columns: 1fr; }
   .subscription-reminder-list { grid-template-columns: 1fr; }

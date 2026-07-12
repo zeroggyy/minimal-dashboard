@@ -54,15 +54,22 @@
     </nav>
 
     <!-- Subscription renewal reminders from a configured Google Sheet -->
-    <section id="subscription-reminder-panel" class="subscription-reminder-panel">
-      <div class="subscription-reminder-header">
-        <div class="subscription-reminder-heading">
-          <i data-lucide="receipt-text"></i>
-          <span>UPCOMING RENEWALS / 即將續訂</span>
+    <section id="subscription-reminder-panel" class="dashboard-card subscription-reminder-panel">
+      <div class="card-header">
+        <div class="card-title-group">
+          <i data-lucide="receipt-text" class="icon-primary"></i>
+          <h2>即將續訂</h2>
+        </div>
+        <span class="timeline-badge">Subscribe</span>
+      </div>
+      <p class="card-subtitle">未來七天即將扣款的訂閱服務。</p>
+
+      <div class="subscription-toolbar">
+        <div class="subscription-toolbar-meta">
           <span id="subscription-summary" class="subscription-summary"></span>
+          <span id="subscription-status" class="subscription-status">尚未設定資料來源</span>
         </div>
         <div class="subscription-reminder-actions">
-          <span id="subscription-status" class="subscription-status">尚未設定資料來源</span>
           <button id="subscription-refresh-btn" class="subscription-text-btn hidden" type="button">
             <i data-lucide="refresh-cw"></i>重新整理
           </button>

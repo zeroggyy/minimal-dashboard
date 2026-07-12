@@ -517,6 +517,7 @@ function showSubscriptionOverlay(rowNumber) {
   metaDate.textContent = `${item.dueDate.replace(/-/g, '.')} · ${formatSubscriptionCountdown(item.daysUntil)}`;
   titleText.textContent = item.name;
   editBtn.style.display = 'none';
+  bodyContent.classList.add('subscription-overlay-body');
 
   const fields = item.fields && Object.keys(item.fields).length > 0
     ? Object.entries(item.fields)
@@ -1654,6 +1655,7 @@ function showCalendarEventOverlay(eventId) {
     const tagsContainer = document.getElementById('overlay-tags-container');
     const linkBtn = document.getElementById('overlay-link-btn');
     const editBtn = document.getElementById('overlay-edit-btn');
+    bodyContent.classList.remove('subscription-overlay-body');
 
     // 1. Populate metadata
     metaList.textContent = (event.calendarName || "CALENDAR").toUpperCase();
@@ -1745,6 +1747,7 @@ function showEditorialOverlay(element) {
     const tagsContainer = document.getElementById('overlay-tags-container');
     const linkBtn = document.getElementById('overlay-link-btn');
     const editBtn = document.getElementById('overlay-edit-btn');
+    bodyContent.classList.remove('subscription-overlay-body');
 
     // Ensure the Edit button is visible for Tasks
     editBtn.style.display = 'inline-flex';
