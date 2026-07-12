@@ -275,6 +275,9 @@ function initSubscriptionReminders() {
       sheetName,
       updatedAt: new Date().toISOString()
     };
+    subscriptionReminders = [];
+    subscriptionCacheUpdatedAt = null;
+    localStorage.removeItem(SUBSCRIPTION_CACHE_KEY);
     saveSubscriptionSettingsLocal();
     renderSubscriptionReminders();
     scheduleScratchpadDriveSync();
@@ -425,12 +428,17 @@ function parseCurrencyValue(value) {
 }
 
 function renderSubscriptionReminders() {
+  const panel = document.getElementById('subscription-reminder-panel');
   const list = document.getElementById('subscription-reminder-list');
   const emptyState = document.getElementById('subscription-empty-state');
   const summary = document.getElementById('subscription-summary');
   const sheetLink = document.getElementById('subscription-sheet-link');
   const refreshButton = document.getElementById('subscription-refresh-btn');
-  if (!list || !emptyState || !summary || !sheetLink || !refreshButton) return;
+  if (!panel || !list || !emptyState || !summary || !sheetLink || !refreshButton) return;
+
+  // Keep first-time setup discoverable, but hide the whole card after setup
+  // when there are no renewal reminders in the configured time window.
+  panel.classList.toggle('hidden', Boolean(subscriptionSettings) && subscriptionReminders.length === 0);
 
   list.innerHTML = '';
   sheetLink.classList.toggle('hidden', !subscriptionSettings);
@@ -577,6 +585,9 @@ function updateSubscriptionStatus(state, message) {
   if (!status) return;
   status.dataset.state = state;
   status.textContent = message;
+  if (state === 'error') {
+    document.getElementById('subscription-reminder-panel')?.classList.remove('hidden');
+  }
 }
 
 function showSubscriptionSettingsError(message) {
