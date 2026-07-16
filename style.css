@@ -132,6 +132,18 @@ body {
   cursor: wait;
 }
 
+.sync-btn.reconnect,
+.sync-btn.sync-error {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.sync-btn.reconnect:hover,
+.sync-btn.sync-error:hover {
+  background-color: var(--accent-color);
+  color: var(--bg-primary);
+}
+
 .status-badge {
   display: flex;
   align-items: center;
@@ -514,6 +526,76 @@ body {
   color: var(--text-primary);
   display: inline-block;
   vertical-align: middle;
+}
+
+.timeline-date-navigation {
+  display: inline-flex;
+  align-items: stretch;
+  height: 32px;
+  border: 1px solid var(--border-color);
+  transition: var(--transition-smooth);
+}
+
+.timeline-date-navigation.is-loading {
+  opacity: 0.5;
+}
+
+#panel-timeline #timeline-allday-container,
+#panel-timeline .milestone-timeline-container {
+  transition: opacity 0.2s ease;
+}
+
+#panel-timeline.is-loading #timeline-allday-container,
+#panel-timeline.is-loading .milestone-timeline-container {
+  opacity: 0.35;
+  pointer-events: none;
+}
+
+.timeline-date-nav-btn,
+.timeline-date-label {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.timeline-date-nav-btn {
+  width: 32px;
+  padding: 0;
+}
+
+.timeline-date-nav-btn svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8px;
+}
+
+.timeline-date-label {
+  min-width: 76px;
+  padding: 0 10px;
+  border-left: 1px solid var(--border-color);
+  border-right: 1px solid var(--border-color);
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.4px;
+  white-space: nowrap;
+}
+
+.timeline-date-nav-btn:hover:not(:disabled),
+.timeline-date-label:hover:not(:disabled) {
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.timeline-date-nav-btn:disabled,
+.timeline-date-label:disabled {
+  cursor: default;
+  opacity: 0.35;
 }
 
 .card-subtitle {
@@ -1293,6 +1375,11 @@ body {
   
   body {
     padding: 24px 12px; /* Muted spacing padding on mobile views */
+  }
+
+  .timeline-date-label {
+    min-width: 68px;
+    padding: 0 8px;
   }
 }
 

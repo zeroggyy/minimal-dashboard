@@ -71,7 +71,9 @@ const SCOPES = [
 // Storage Key for Google Token
 const STORAGE_TOKEN_KEY = 'google_oauth_token';
 const STORAGE_SCOPE_VERSION_KEY = 'google_oauth_scope_version';
+const STORAGE_TOKEN_EXPIRES_AT_KEY = 'google_oauth_token_expires_at';
 const OAUTH_SCOPE_VERSION = 'sheets-read-v4';
+const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const SCRATCHPAD_STORAGE_KEY = 'scratchpad_notes';
 const SCRATCHPAD_DRIVE_FILE_NAME = 'scratchpad.json';
 const SUBSCRIPTION_SETTINGS_KEY = 'subscription_sheet_settings';
@@ -79,7 +81,16 @@ const SUBSCRIPTION_CACHE_KEY = 'subscription_reminder_cache';
 
 // Global variables for Google integration
 let googleAccessToken = null;
+let googleTokenExpiresAt = 0;
+let googleTokenExpiryTimer = null;
+let googleLastSyncAt = 0;
+let googleSyncInProgress = false;
+let googleAutoSyncTimer = null;
 let googleEvents = [];
+let timelineSelectedDate = startOfLocalDay(new Date());
+let timelineFollowsToday = true;
+let timelineCalendarRequestId = 0;
+let timelineIsLoading = false;
 let googleTaskLists = []; // Cache list IDs and names
 let googleCalendarLists = []; // Cache calendar IDs and names
 let scratchpadDriveFileId = null;
@@ -1197,6 +1208,7 @@ function updateHeaderTime() {
   const hours = String(now.getHours()).padStart(2, '0');
   const minutes = String(now.getMinutes()).padStart(2, '0');
   currentTimeTextEl.textContent = `${hours}:${minutes}`;
+  handleTimelineDayRollover(now);
 }
 
 // 2. Google OAuth 2.0 Integration
@@ -1211,13 +1223,21 @@ function initGoogleAuth() {
   // Check if we already have a token stored in session storage (lasts until tab close)
   const savedToken = sessionStorage.getItem(STORAGE_TOKEN_KEY);
   const savedScopeVersion = sessionStorage.getItem(STORAGE_SCOPE_VERSION_KEY);
-  if (savedToken && savedScopeVersion === OAUTH_SCOPE_VERSION) {
+  const savedExpiresAt = Number(sessionStorage.getItem(STORAGE_TOKEN_EXPIRES_AT_KEY)) || 0;
+  const savedTokenIsExpired = savedExpiresAt > 0 && savedExpiresAt <= Date.now();
+
+  if (savedToken && savedScopeVersion === OAUTH_SCOPE_VERSION && !savedTokenIsExpired) {
     googleAccessToken = savedToken;
+    googleTokenExpiresAt = savedExpiresAt;
+    scheduleGoogleTokenExpiry();
+    updateTimelineDateNavigation();
     updateSyncButtonState('synced');
     syncGoogleData();
   } else if (savedToken) {
-    sessionStorage.removeItem(STORAGE_TOKEN_KEY);
-    sessionStorage.removeItem(STORAGE_SCOPE_VERSION_KEY);
+    clearStoredGoogleToken();
+    if (savedTokenIsExpired) updateSyncButtonState('reconnect');
+  } else {
+    updateSyncButtonState('idle');
   }
 
   // Bind click event to Sync button
@@ -1228,6 +1248,12 @@ function initGoogleAuth() {
     } else {
       authenticateWithGoogle();
     }
+  });
+
+  googleAutoSyncTimer = window.setInterval(runAutomaticGoogleSync, AUTO_SYNC_INTERVAL_MS);
+  window.addEventListener('focus', runAutomaticGoogleSync);
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') runAutomaticGoogleSync();
   });
 }
 
@@ -1251,10 +1277,15 @@ function authenticateWithGoogle() {
           return;
         }
         
-        // Save token to session and global state
+        // Save the short-lived token and its expiry so the page can clearly ask
+        // for a one-click reconnect instead of silently showing stale data.
         googleAccessToken = tokenResponse.access_token;
+        googleTokenExpiresAt = Date.now() + (Number(tokenResponse.expires_in) || 3600) * 1000;
         sessionStorage.setItem(STORAGE_TOKEN_KEY, googleAccessToken);
         sessionStorage.setItem(STORAGE_SCOPE_VERSION_KEY, OAUTH_SCOPE_VERSION);
+        sessionStorage.setItem(STORAGE_TOKEN_EXPIRES_AT_KEY, String(googleTokenExpiresAt));
+        scheduleGoogleTokenExpiry();
+        updateTimelineDateNavigation();
         document.getElementById('scratchpad-auth-notice')?.classList.add('hidden');
         
         updateSyncButtonState('synced');
@@ -1266,7 +1297,8 @@ function authenticateWithGoogle() {
       }
     });
 
-    tokenClient.requestAccessToken({ prompt: 'consent' });
+    // An empty prompt only shows consent/account UI when Google requires it.
+    tokenClient.requestAccessToken({ prompt: '' });
   } catch (err) {
     console.error("Authentication trigger failed: ", err);
     updateSyncButtonState('idle');
@@ -1282,18 +1314,73 @@ function updateSyncButtonState(state) {
     syncBtn.className = 'sync-btn synced';
     syncBtn.innerHTML = `<span>SYNCED</span><span class="slash"> /</span>`;
     syncBtn.disabled = false;
+    syncBtn.title = googleLastSyncAt
+      ? `已於 ${new Date(googleLastSyncAt).toLocaleTimeString('zh-TW', { hour: '2-digit', minute: '2-digit' })} 更新`
+      : '已連結 Google';
+  } else if (state === 'reconnect') {
+    syncBtn.className = 'sync-btn reconnect';
+    syncBtn.innerHTML = `<span>RECONNECT</span><span class="slash"> /</span>`;
+    syncBtn.disabled = false;
+    syncBtn.title = 'Google 授權已到期，點一下即可重新連線';
+  } else if (state === 'error') {
+    syncBtn.className = 'sync-btn sync-error';
+    syncBtn.innerHTML = `<span>RETRY</span><span class="slash"> /</span>`;
+    syncBtn.disabled = false;
+    syncBtn.title = '部分資料更新失敗，點一下重試';
   } else {
     syncBtn.className = 'sync-btn';
     syncBtn.innerHTML = `<span>SYNC</span><span class="slash"> /</span>`;
     syncBtn.disabled = false;
+    syncBtn.title = '連結 Google 並同步資料';
   }
+}
+
+function runAutomaticGoogleSync() {
+  if (!googleAccessToken) return;
+  if (isGoogleTokenExpired()) {
+    handleAuthExpired();
+    return;
+  }
+
+  const elapsed = Date.now() - googleLastSyncAt;
+  if (!googleLastSyncAt || elapsed >= AUTO_SYNC_INTERVAL_MS) {
+    syncGoogleData();
+  }
+}
+
+function isGoogleTokenExpired() {
+  return googleTokenExpiresAt > 0 && Date.now() >= googleTokenExpiresAt;
+}
+
+function scheduleGoogleTokenExpiry() {
+  if (googleTokenExpiryTimer) window.clearTimeout(googleTokenExpiryTimer);
+  if (!googleTokenExpiresAt) return;
+
+  const delay = Math.max(0, googleTokenExpiresAt - Date.now());
+  googleTokenExpiryTimer = window.setTimeout(handleAuthExpired, delay);
+}
+
+function clearStoredGoogleToken() {
+  sessionStorage.removeItem(STORAGE_TOKEN_KEY);
+  sessionStorage.removeItem(STORAGE_SCOPE_VERSION_KEY);
+  sessionStorage.removeItem(STORAGE_TOKEN_EXPIRES_AT_KEY);
 }
 
 // Global data synchronization coordinator
 async function syncGoogleData() {
   if (!googleAccessToken) return;
+  if (isGoogleTokenExpired()) {
+    handleAuthExpired();
+    return;
+  }
+  if (googleSyncInProgress) {
+    return;
+  }
+
+  googleSyncInProgress = true;
   document.getElementById('scratchpad-auth-notice')?.classList.add('hidden');
   updateSyncButtonState('syncing');
+  let hasSyncError = false;
   
   // Decouple task and calendar synchronization to prevent one failing service from crashing the other
   try {
@@ -1302,8 +1389,10 @@ async function syncGoogleData() {
     console.error("Syncing Google Tasks failed: ", err);
     if (err.status === 401) {
       handleAuthExpired();
+      googleSyncInProgress = false;
       return;
     }
+    hasSyncError = true;
   }
 
   try {
@@ -1312,8 +1401,10 @@ async function syncGoogleData() {
     console.error("Syncing Google Calendars failed: ", err);
     if (err.status === 401) {
       handleAuthExpired();
+      googleSyncInProgress = false;
       return;
     }
+    hasSyncError = true;
   }
 
   try {
@@ -1322,26 +1413,40 @@ async function syncGoogleData() {
     console.error('Syncing scratchpad with Google Drive failed:', err);
     if (err.status === 401) {
       handleAuthExpired();
+      googleSyncInProgress = false;
       return;
     }
+    hasSyncError = true;
   }
 
   try {
     await fetchSubscriptionReminders();
   } catch (err) {
     console.error('Syncing subscription reminders failed:', err);
+    if (err.status === 401) {
+      handleAuthExpired();
+      googleSyncInProgress = false;
+      return;
+    }
+    hasSyncError = true;
     updateSubscriptionStatus('error', '無法讀取訂閱資料');
   }
 
-  updateSyncButtonState('synced');
+  googleLastSyncAt = Date.now();
+  updateSyncButtonState(hasSyncError ? 'error' : 'synced');
+  googleSyncInProgress = false;
 }
 
 function handleAuthExpired() {
+  if (googleTokenExpiryTimer) window.clearTimeout(googleTokenExpiryTimer);
+  googleTokenExpiryTimer = null;
   googleAccessToken = null;
+  googleTokenExpiresAt = 0;
   scratchpadDriveFileId = null;
-  sessionStorage.removeItem(STORAGE_TOKEN_KEY);
-  sessionStorage.removeItem(STORAGE_SCOPE_VERSION_KEY);
-  updateSyncButtonState('idle');
+  googleSyncInProgress = false;
+  clearStoredGoogleToken();
+  updateTimelineDateNavigation();
+  updateSyncButtonState('reconnect');
   updateScratchpadSyncStatus('local');
   document.getElementById('scratchpad-auth-notice')?.classList.remove('hidden');
 }
@@ -1481,7 +1586,11 @@ async function syncAllGoogleTasks() {
           const tasksRes = await fetch(`https://www.googleapis.com/tasks/v1/lists/${encodeURIComponent(list.id)}/tasks?${params}`, {
             headers: { 'Authorization': `Bearer ${googleAccessToken}` }
           });
-          if (!tasksRes.ok) return;
+          if (!tasksRes.ok) {
+            const error = new Error(`Fetch tasks failed (${tasksRes.status})`);
+            error.status = tasksRes.status;
+            throw error;
+          }
 
           const tasksData = await tasksRes.json();
           const items = tasksData.items || [];
@@ -1508,6 +1617,7 @@ async function syncAllGoogleTasks() {
         } while (pageToken);
       } catch (e) {
         console.error(`Error loading tasks from list ${list.title}:`, e);
+        throw e;
       }
     });
 
@@ -2023,6 +2133,10 @@ function saveTodosLocal() {
 
 // 4. Multi-Calendar Explorer & Google Calendar API
 async function syncAllGoogleCalendars() {
+  const requestId = ++timelineCalendarRequestId;
+  const targetDate = startOfLocalDay(timelineSelectedDate);
+  setTimelineLoading(true);
+
   try {
     // 1. Fetch list of all subscribed calendars
     const calendarsRes = await fetch('https://www.googleapis.com/calendar/v3/users/me/calendarList', {
@@ -2042,23 +2156,24 @@ async function syncAllGoogleCalendars() {
     googleCalendarLists = (calendarsData.items || []).filter(c => c.selected !== false);
 
     if (googleCalendarLists.length === 0) {
-      googleEvents = [];
-      renderTimeline();
+      if (requestId === timelineCalendarRequestId) {
+        googleEvents = [];
+        renderTimeline();
+      }
       return;
     }
 
-    const now = new Date();
     // Calculate local start and end times formatted as RFC3339 strings with correct offsets
     const pad = (num) => String(num).padStart(2, '0');
     
     // Convert local start of day to offset RFC3339 string (e.g. YYYY-MM-DDT00:00:00+08:00)
-    const tzo = -now.getTimezoneOffset();
+    const tzo = -targetDate.getTimezoneOffset();
     const dif = tzo >= 0 ? '+' : '-';
     const offsetStr = `${dif}${pad(Math.floor(Math.abs(tzo) / 60))}:${pad(Math.abs(tzo) % 60)}`;
     
-    const yyyy = now.getFullYear();
-    const mm = pad(now.getMonth() + 1);
-    const dd = pad(now.getDate());
+    const yyyy = targetDate.getFullYear();
+    const mm = pad(targetDate.getMonth() + 1);
+    const dd = pad(targetDate.getDate());
     
     const startOfDay = `${yyyy}-${mm}-${dd}T00:00:00${offsetStr}`;
     const endOfDay = `${yyyy}-${mm}-${dd}T23:59:59${offsetStr}`;
@@ -2076,7 +2191,9 @@ async function syncAllGoogleCalendars() {
         if (!eventsRes.ok) {
           const errText = await eventsRes.text();
           console.warn(`Fetch events failed for calendar [${calendar.summary}] (ID: ${calendar.id}) - Status: ${eventsRes.status}, Error: ${errText}`);
-          return;
+          const error = new Error(`Fetch calendar events failed (${eventsRes.status})`);
+          error.status = eventsRes.status;
+          throw error;
         }
         const eventsData = await eventsRes.json();
         const items = eventsData.items || [];
@@ -2142,6 +2259,7 @@ async function syncAllGoogleCalendars() {
         });
       } catch (e) {
         console.error(`Error loading calendar events for ${calendar.summary}:`, e);
+        throw e;
       }
     });
 
@@ -2150,17 +2268,28 @@ async function syncAllGoogleCalendars() {
     // Sort combined schedules by chronologic starting time
     allFetchedEvents.sort((a, b) => a.startTimeObj.getTime() - b.startTimeObj.getTime());
     
-    googleEvents = allFetchedEvents;
-    renderTimeline();
+    if (requestId === timelineCalendarRequestId) {
+      googleEvents = allFetchedEvents;
+      renderTimeline();
+    }
   } catch (err) {
     console.error("syncAllGoogleCalendars failed: ", err);
     // If permission or calendar API fail specifically, clear cached list to notify user but do not crash tasks sync
-    googleEvents = [];
-    renderTimeline();
+    if (requestId === timelineCalendarRequestId) {
+      googleEvents = [];
+      renderTimeline();
+    }
+    throw err;
+  } finally {
+    if (requestId === timelineCalendarRequestId) setTimelineLoading(false);
   }
 }
 
 function initTimeline() {
+  document.getElementById('timeline-prev-date')?.addEventListener('click', () => shiftTimelineDate(-1));
+  document.getElementById('timeline-next-date')?.addEventListener('click', () => shiftTimelineDate(1));
+  document.getElementById('timeline-date')?.addEventListener('click', returnTimelineToToday);
+
   // If not logged in, render default mock timeline list
   if (!googleAccessToken) {
     googleEvents = [
@@ -2169,7 +2298,101 @@ function initTimeline() {
       { id: 'm-3', title: "享受無雜訊日系網格時間流", start: "14:00", end: "15:00", type: "break" }
     ];
   }
+  updateTimelineDateNavigation();
   renderTimeline();
+}
+
+function startOfLocalDay(date) {
+  const result = new Date(date);
+  result.setHours(0, 0, 0, 0);
+  return result;
+}
+
+function isSameLocalDate(dateA, dateB) {
+  return dateA.getFullYear() === dateB.getFullYear()
+    && dateA.getMonth() === dateB.getMonth()
+    && dateA.getDate() === dateB.getDate();
+}
+
+function formatTimelineDate(date) {
+  if (isSameLocalDate(date, new Date())) return 'Today';
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${month}.${day} / ${weekdays[date.getDay()]}`;
+}
+
+function formatTimelineDateLong(date) {
+  const weekdays = ['日', '一', '二', '三', '四', '五', '六'];
+  return `${date.getFullYear()} 年 ${date.getMonth() + 1} 月 ${date.getDate()} 日・星期${weekdays[date.getDay()]}`;
+}
+
+function updateTimelineDateNavigation() {
+  const label = document.getElementById('timeline-date');
+  const previousButton = document.getElementById('timeline-prev-date');
+  const nextButton = document.getElementById('timeline-next-date');
+  const navigation = document.getElementById('timeline-date-navigation');
+  if (!label || !previousButton || !nextButton || !navigation) return;
+
+  const isTodaySelected = isSameLocalDate(timelineSelectedDate, new Date());
+  label.textContent = formatTimelineDate(timelineSelectedDate);
+  label.setAttribute('aria-label', isTodaySelected
+    ? '目前顯示今天'
+    : `目前顯示 ${formatTimelineDateLong(timelineSelectedDate)}，按下回到今天`);
+  label.title = isTodaySelected ? '今天' : '回到今天';
+
+  const navigationDisabled = !googleAccessToken || timelineIsLoading;
+  previousButton.disabled = navigationDisabled;
+  nextButton.disabled = navigationDisabled;
+  label.disabled = navigationDisabled || isTodaySelected;
+  navigation.classList.toggle('is-loading', timelineIsLoading);
+}
+
+function setTimelineLoading(isLoading) {
+  timelineIsLoading = isLoading;
+  const panel = document.getElementById('panel-timeline');
+  if (panel) {
+    panel.setAttribute('aria-busy', String(isLoading));
+    panel.classList.toggle('is-loading', isLoading);
+  }
+  updateTimelineDateNavigation();
+}
+
+async function shiftTimelineDate(dayOffset) {
+  if (!googleAccessToken || timelineIsLoading) return;
+  const nextDate = startOfLocalDay(timelineSelectedDate);
+  nextDate.setDate(nextDate.getDate() + dayOffset);
+  timelineSelectedDate = nextDate;
+  timelineFollowsToday = isSameLocalDate(timelineSelectedDate, new Date());
+  updateTimelineDateNavigation();
+  await refreshSelectedTimelineDate();
+}
+
+async function returnTimelineToToday() {
+  if (!googleAccessToken || timelineIsLoading || isSameLocalDate(timelineSelectedDate, new Date())) return;
+  timelineSelectedDate = startOfLocalDay(new Date());
+  timelineFollowsToday = true;
+  updateTimelineDateNavigation();
+  await refreshSelectedTimelineDate();
+}
+
+async function refreshSelectedTimelineDate() {
+  try {
+    await syncAllGoogleCalendars();
+  } catch (error) {
+    if (error.status === 401) {
+      handleAuthExpired();
+    } else {
+      updateSyncButtonState('error');
+    }
+  }
+}
+
+function handleTimelineDayRollover(now) {
+  if (!timelineFollowsToday || isSameLocalDate(timelineSelectedDate, now)) return;
+  timelineSelectedDate = startOfLocalDay(now);
+  updateTimelineDateNavigation();
+  if (googleAccessToken && !timelineIsLoading) refreshSelectedTimelineDate();
 }
 
 function renderEmptyTimelineState() {
@@ -2187,11 +2410,11 @@ function renderEmptyTimelineState() {
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364-6.364l-.707.707M6.343 17.657l-.707.707m0-12.728l.707.707m11.314 11.314l.707.707M12 8a4 4 0 100 8 4 4 0 000-8z" />
       </svg>
       <div style="display: flex; flex-direction: column; gap: 8px;">
-        <h3 style="font-family: var(--font-serif); font-size: 1.1rem; font-weight: 700; color: var(--text-primary); letter-spacing: 0.5px;">今天，時光無痕</h3>
+        <h3 style="font-family: var(--font-serif); font-size: 1.1rem; font-weight: 700; color: var(--text-primary); letter-spacing: 0.5px;">${isSameLocalDate(timelineSelectedDate, new Date()) ? '今天' : '這一天'}，時光無痕</h3>
         <span style="font-size: 0.7rem; color: var(--text-secondary); letter-spacing: 1px; text-transform: uppercase; font-weight: 500;">A Day in Quietude</span>
       </div>
       <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6; max-width: 280px; margin: 0;">
-        當下沒有任何安排。不妨慢下來，泡杯茶，享受這段安靜的留白。
+        ${isSameLocalDate(timelineSelectedDate, new Date()) ? '當下' : '這一天'}沒有任何安排。不妨慢下來，泡杯茶，享受這段安靜的留白。
       </p>
     </div>
   `;
@@ -2230,7 +2453,7 @@ function renderTimeline() {
     allDayContainer.style.marginBottom = '24px';
     
     let highlightsHtml = `
-      <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 10px; letter-spacing: 1px; padding: 0 8px;">ALL-DAY HIGHLIGHTS / 今日摘要</div>
+      <div style="font-size: 0.8rem; font-weight: 700; color: var(--text-secondary); margin-bottom: 10px; letter-spacing: 1px; padding: 0 8px;">ALL-DAY HIGHLIGHTS / 當日摘要</div>
       <div style="display: grid; grid-template-columns: 1fr; gap: 8px;">
     `;
     
@@ -2261,7 +2484,7 @@ function renderTimeline() {
     
     timelineEvents.innerHTML = `
       <div class="timeline-empty-card" style="margin-top: 16px; padding: 32px 0; border: 1px dashed var(--border-color); text-align: center; color: var(--text-secondary); font-size: 0.85rem; font-family: var(--font-serif); letter-spacing: 0.5px;">
-        今日無特定時間行程 / NO TIMED EVENTS
+        這一天無特定時間行程 / NO TIMED EVENTS
       </div>
     `;
     return;
@@ -2332,6 +2555,12 @@ function updateTimeIndicator() {
   
   const milestoneItems = document.querySelectorAll('.timeline-milestone-item');
   const timedEvents = googleEvents.filter(e => !e.isAllDay);
+
+  if (!isSameLocalDate(timelineSelectedDate, now)) {
+    timeSpineIndicator.classList.add('hidden');
+    milestoneItems.forEach(item => item.classList.remove('past'));
+    return;
+  }
   
   if (milestoneItems.length === 0 || timedEvents.length === 0) {
     timeSpineIndicator.classList.add('hidden');

@@ -176,9 +176,17 @@
             <i data-lucide="calendar" class="icon-primary"></i>
             <h2>今日歷歷</h2>
           </div>
-          <span class="timeline-badge" id="timeline-date">Today</span>
+          <div class="timeline-date-navigation" id="timeline-date-navigation" aria-label="日曆日期導覽">
+            <button id="timeline-prev-date" class="timeline-date-nav-btn" type="button" aria-label="查看前一天" title="前一天">
+              <i data-lucide="chevron-left"></i>
+            </button>
+            <button id="timeline-date" class="timeline-date-label" type="button" aria-label="回到今天" title="回到今天">Today</button>
+            <button id="timeline-next-date" class="timeline-date-nav-btn" type="button" aria-label="查看後一天" title="後一天">
+              <i data-lucide="chevron-right"></i>
+            </button>
+          </div>
         </div>
-        <p class="card-subtitle">在時間的河流裡，寫下今天生活過的痕跡。</p>
+        <p class="card-subtitle">在時間的河流裡，寫下這一天生活過的痕跡。</p>
 
         <div class="milestone-timeline-container">
           <!-- The central line that cuts through the cards -->

@@ -25,6 +25,9 @@
 - 隨機顯示一則中英對照的每日短句。
 - 顯示目前時間並每分鐘更新。
 - `SYNC` 統一處理 Google OAuth 授權與資料重新整理。
+- 授權有效期間每 10 分鐘自動更新 Tasks、Calendar、Drive 與訂閱資料。
+- 切回分頁或重新聚焦視窗時，若距離上次同步已超過 10 分鐘會立即補同步。
+- 權杖到期時顯示 `RECONNECT`；部分資料更新失敗時顯示 `RETRY`，避免把舊資料誤標為已同步。
 
 ### 手頭的事 · Google Tasks
 
@@ -44,6 +47,7 @@
 ### 今日歷歷 · Google Calendar
 
 - 讀取使用者可見的 Google Calendars 與今天的所有行程。
+- 可從卡片右上角查看前一天或後一天，並點擊日期快速回到今天。
 - 全天事件集中顯示在 All-Day Highlights。
 - 有時間的行程以左右交錯的垂直時間軸呈現。
 - 依當日行程範圍動態調整時間軸比例。
@@ -241,7 +245,7 @@ PowerShell 視窗需要保持開啟；按 `Ctrl + C` 可停止伺服器。
 - 訂閱 Sheet 使用唯讀 scope，Dashboard 不會修改試算表。
 - GitHub Pages 公開的是程式碼，不是使用者的 Google 資料。
 - OAuth Client ID 可以出現在前端；Client Secret、服務帳號金鑰與其他私密憑證不得提交到 repository。
-- Access Token 只保存在 `sessionStorage`，失效後需要重新點擊 `SYNC`。
+- Access Token 與到期時間只保存在 `sessionStorage`，失效後需要點擊 `RECONNECT` 重新取得短效權杖。
 - 若 OAuth 應用仍為測試狀態，只有 Google Auth Platform 中設定的測試使用者可以登入。
 
 ---
@@ -251,7 +255,7 @@ PowerShell 視窗需要保持開啟；按 `Ctrl + C` 可停止伺服器。
 - Google Tasks API 只能寫入到期「日期」，不能讀寫原生到期時間。
 - Google Tasks API 沒有開放建立原生重複規則，因此 Dashboard 不會假裝建立循環任務。
 - 訂閱提醒目前只在開啟 Dashboard 時顯示，不會在網頁關閉後寄信或發送系統通知。
-- Google Access Token 有效期限有限，過期後需要重新授權。
+- Google Access Token 有效期限有限；純前端 OAuth 無法在無使用者操作時取得新權杖，過期後仍需點擊一次 `RECONNECT`。
 - 靜態前端無法安全保存 Client Secret，也不應嘗試加入。
 
 ---
