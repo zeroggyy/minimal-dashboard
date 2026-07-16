@@ -676,6 +676,12 @@ function initScratchpad() {
   });
 
   list.addEventListener('click', (event) => {
+    const editButton = event.target.closest('[data-action="edit-scratchpad-note"]');
+    if (editButton) {
+      openScratchpadEditPanel(editButton.dataset.noteId);
+      return;
+    }
+
     const deleteButton = event.target.closest('[data-action="delete-scratchpad-note"]');
     if (deleteButton) {
       const deletedAt = new Date().toISOString();
@@ -702,10 +708,23 @@ function initScratchpad() {
     const cancelButton = event.target.closest('[data-action="cancel-scratchpad-convert"]');
     if (cancelButton) {
       cancelButton.closest('.scratchpad-convert-panel')?.remove();
+      return;
+    }
+
+    const cancelEditButton = event.target.closest('[data-action="cancel-scratchpad-edit"]');
+    if (cancelEditButton) {
+      cancelEditButton.closest('.scratchpad-edit-panel')?.remove();
     }
   });
 
   list.addEventListener('submit', (event) => {
+    const editForm = event.target.closest('.scratchpad-edit-panel');
+    if (editForm) {
+      event.preventDefault();
+      submitScratchpadEdit(editForm);
+      return;
+    }
+
     const convertForm = event.target.closest('.scratchpad-convert-panel');
     if (!convertForm) return;
     event.preventDefault();
@@ -993,6 +1012,15 @@ function renderScratchpadNotes() {
       disabled: !note.text || note.conversions.some(conversion => conversion.type === 'calendar')
     });
 
+    const editButton = document.createElement('button');
+    editButton.type = 'button';
+    editButton.className = 'scratchpad-action-btn';
+    editButton.dataset.action = 'edit-scratchpad-note';
+    editButton.dataset.noteId = note.id;
+    editButton.setAttribute('aria-label', '編輯閃念');
+    editButton.title = '編輯';
+    editButton.innerHTML = '<i data-lucide="pencil"></i>';
+
     const deleteButton = document.createElement('button');
     deleteButton.type = 'button';
     deleteButton.className = 'scratchpad-action-btn btn-delete';
@@ -1002,7 +1030,7 @@ function renderScratchpadNotes() {
     deleteButton.title = '刪除';
     deleteButton.innerHTML = '<i data-lucide="trash-2"></i>';
 
-    actions.append(taskButton, calendarButton, deleteButton);
+    actions.append(taskButton, calendarButton, editButton, deleteButton);
     row.append(content, actions);
     noteElement.appendChild(row);
     list.appendChild(noteElement);
@@ -1257,7 +1285,7 @@ function createScratchpadActionButton({ noteId, type, icon, label, disabled }) {
 }
 
 function openScratchpadConvertPanel(noteId, type) {
-  document.querySelectorAll('.scratchpad-convert-panel').forEach(panel => panel.remove());
+  document.querySelectorAll('.scratchpad-convert-panel, .scratchpad-edit-panel').forEach(panel => panel.remove());
   const note = scratchpadNotes.find(item => item.id === noteId && !item.deletedAt);
   const noteElement = document.querySelector(`.scratchpad-note[data-note-id="${CSS.escape(noteId)}"]`);
   if (!note || !noteElement) return;
@@ -1309,6 +1337,100 @@ function openScratchpadConvertPanel(noteId, type) {
 
   noteElement.appendChild(panel);
   if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function openScratchpadEditPanel(noteId) {
+  document.querySelectorAll('.scratchpad-convert-panel, .scratchpad-edit-panel').forEach(panel => panel.remove());
+  const note = scratchpadNotes.find(item => item.id === noteId && !item.deletedAt);
+  const noteElement = document.querySelector(`.scratchpad-note[data-note-id="${CSS.escape(noteId)}"]`);
+  if (!note || !noteElement) return;
+
+  const panel = document.createElement('form');
+  panel.className = 'scratchpad-edit-panel';
+  panel.dataset.noteId = noteId;
+
+  const heading = document.createElement('div');
+  heading.className = 'scratchpad-edit-heading';
+  heading.innerHTML = '<i data-lucide="pencil"></i><span>EDIT NOTE / 編輯閃念</span>';
+
+  const textarea = document.createElement('textarea');
+  textarea.className = 'scratchpad-edit-textarea';
+  textarea.name = 'text';
+  textarea.rows = 5;
+  textarea.value = note.text || '';
+  textarea.setAttribute('aria-label', '編輯閃念內容');
+  textarea.placeholder = note.attachment?.type === 'image' ? '為這張圖片補充文字或 Markdown…' : '輸入閃念內容…';
+
+  const footer = document.createElement('div');
+  footer.className = 'scratchpad-edit-footer';
+
+  const hint = document.createElement('span');
+  hint.className = 'scratchpad-edit-hint';
+  hint.textContent = '支援 Markdown · Ctrl / Cmd + Enter 儲存';
+
+  const actions = document.createElement('div');
+  actions.className = 'scratchpad-edit-actions';
+
+  const cancelButton = document.createElement('button');
+  cancelButton.type = 'button';
+  cancelButton.className = 'scratchpad-edit-cancel';
+  cancelButton.dataset.action = 'cancel-scratchpad-edit';
+  cancelButton.textContent = '取消';
+
+  const saveButton = document.createElement('button');
+  saveButton.type = 'submit';
+  saveButton.className = 'scratchpad-edit-save';
+  saveButton.textContent = '儲存並關閉';
+
+  actions.append(cancelButton, saveButton);
+  footer.append(hint, actions);
+  panel.append(heading, textarea, footer);
+  noteElement.appendChild(panel);
+
+  textarea.addEventListener('keydown', event => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      panel.remove();
+      return;
+    }
+    if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      panel.requestSubmit();
+    }
+  });
+
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+  textarea.focus();
+  textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+}
+
+function submitScratchpadEdit(form) {
+  const note = scratchpadNotes.find(item => item.id === form.dataset.noteId && !item.deletedAt);
+  const textarea = form.elements.namedItem('text');
+  const saveButton = form.querySelector('.scratchpad-edit-save');
+  if (!note || !(textarea instanceof HTMLTextAreaElement) || !saveButton) return;
+
+  const text = textarea.value.trim();
+  if (!text && note.attachment?.type !== 'image') {
+    textarea.setCustomValidity('文字記事不能為空白。');
+    textarea.reportValidity();
+    textarea.focus();
+    return;
+  }
+  textarea.setCustomValidity('');
+
+  if (text === (note.text || '')) {
+    form.remove();
+    return;
+  }
+
+  const updatedAt = new Date().toISOString();
+  scratchpadNotes = scratchpadNotes.map(item => item.id === note.id
+    ? { ...item, text, updatedAt }
+    : item);
+  saveScratchpadNotes();
+  renderScratchpadNotes();
+  scheduleScratchpadDriveSync();
 }
 
 async function submitScratchpadConversion(form) {

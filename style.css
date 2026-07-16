@@ -2039,6 +2039,100 @@ body {
 .scratchpad-action-btn svg { width: 13px; height: 13px; }
 .scratchpad-action-btn:disabled { opacity: 0.28; cursor: default; pointer-events: none; }
 
+.scratchpad-edit-panel {
+  padding: 16px 0 20px;
+  border-top: 1px dashed var(--border-color);
+  animation: panelExpand 0.22s cubic-bezier(0.16,1,0.3,1);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.scratchpad-edit-heading {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border-color);
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.scratchpad-edit-heading svg { width: 13px; height: 13px; }
+
+.scratchpad-edit-textarea {
+  width: 100%;
+  min-height: 118px;
+  padding: 12px 14px;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 0.88rem;
+  line-height: 1.6;
+  resize: vertical;
+  outline: none;
+  box-sizing: border-box;
+  transition: var(--transition-smooth);
+}
+
+.scratchpad-edit-textarea:focus { border-color: var(--text-primary); }
+
+.scratchpad-edit-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.scratchpad-edit-hint {
+  color: var(--text-tertiary);
+  font-size: 0.67rem;
+  letter-spacing: 0.25px;
+}
+
+.scratchpad-edit-actions { display: flex; flex-shrink: 0; }
+
+.scratchpad-edit-cancel,
+.scratchpad-edit-save {
+  height: 36px;
+  padding: 0 18px;
+  border: 1px solid var(--border-color);
+  font-family: var(--font-sans);
+  font-size: 0.8rem;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+  box-sizing: border-box;
+}
+
+.scratchpad-edit-cancel {
+  margin-right: -1px;
+  background: transparent;
+  color: var(--text-secondary);
+}
+
+.scratchpad-edit-cancel:hover {
+  position: relative;
+  z-index: 1;
+  color: var(--text-primary);
+  border-color: var(--text-primary);
+}
+
+.scratchpad-edit-save {
+  border-color: var(--text-primary);
+  background: var(--text-primary);
+  color: var(--bg-primary);
+}
+
+.scratchpad-edit-save:hover {
+  border-color: var(--accent-color);
+  background: var(--accent-color);
+}
+
 .scratchpad-convert-panel {
   padding: 16px 0 20px 0;
   border-top: 1px dashed var(--border-color);
@@ -2143,6 +2237,13 @@ body {
 .convert-confirm-btn:disabled { opacity: 0.4; cursor: wait; }
 
 .scratchpad-note.sending { opacity: 0.35; pointer-events: none; transition: opacity 0.3s ease; }
+
+@media (max-width: 520px) {
+  .scratchpad-edit-footer { align-items: flex-start; flex-direction: column; }
+  .scratchpad-edit-actions { align-self: stretch; }
+  .scratchpad-edit-cancel,
+  .scratchpad-edit-save { flex: 1; }
+}
 
 .scratchpad-empty {
   display: flex;
