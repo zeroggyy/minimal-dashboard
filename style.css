@@ -529,10 +529,13 @@ body {
 }
 
 .timeline-date-navigation {
-  display: inline-flex;
+  display: flex;
   align-items: stretch;
-  height: 32px;
+  width: 100%;
+  height: 48px;
+  margin-bottom: 32px;
   border: 1px solid var(--border-color);
+  box-sizing: border-box;
   transition: var(--transition-smooth);
 }
 
@@ -565,7 +568,8 @@ body {
 }
 
 .timeline-date-nav-btn {
-  width: 32px;
+  width: 48px;
+  flex: 0 0 48px;
   padding: 0;
 }
 
@@ -576,7 +580,8 @@ body {
 }
 
 .timeline-date-label {
-  min-width: 76px;
+  min-width: 0;
+  flex: 1 1 auto;
   padding: 0 10px;
   border-left: 1px solid var(--border-color);
   border-right: 1px solid var(--border-color);
@@ -1377,10 +1382,6 @@ body {
     padding: 24px 12px; /* Muted spacing padding on mobile views */
   }
 
-  .timeline-date-label {
-    min-width: 68px;
-    padding: 0 8px;
-  }
 }
 
 /* Footer Styles */
