@@ -943,7 +943,7 @@ function renderScratchpadNotes() {
 
     const textElement = document.createElement('div');
     textElement.className = 'scratchpad-note-text';
-    textElement.textContent = note.text;
+    renderScratchpadMarkdown(textElement, note.text);
     if (note.text) content.appendChild(textElement);
 
     if (note.attachment?.type === 'image' && !note.attachment.driveDeletedAt) {
@@ -1010,6 +1010,195 @@ function renderScratchpadNotes() {
 
   if (typeof lucide !== 'undefined') {
     lucide.createIcons();
+  }
+}
+
+function renderScratchpadMarkdown(container, text) {
+  container.classList.add('scratchpad-markdown');
+  const lines = text.replace(/\r\n?/g, '\n').split('\n');
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    if (!line.trim()) {
+      index += 1;
+      continue;
+    }
+
+    const fenceMatch = line.match(/^\s*```\s*([^\s`]*)\s*$/);
+    if (fenceMatch) {
+      const codeLines = [];
+      index += 1;
+      while (index < lines.length && !/^\s*```\s*$/.test(lines[index])) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      if (index < lines.length) index += 1;
+      const pre = document.createElement('pre');
+      const code = document.createElement('code');
+      if (fenceMatch[1]) code.dataset.language = fenceMatch[1];
+      code.textContent = codeLines.join('\n');
+      pre.appendChild(code);
+      container.appendChild(pre);
+      continue;
+    }
+
+    const headingMatch = line.match(/^\s*(#{1,3})\s+(.+)$/);
+    if (headingMatch) {
+      const heading = document.createElement(`h${headingMatch[1].length + 2}`);
+      appendInlineScratchpadMarkdown(heading, headingMatch[2]);
+      container.appendChild(heading);
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*(?:---+|___+|\*\*\*+)\s*$/.test(line)) {
+      container.appendChild(document.createElement('hr'));
+      index += 1;
+      continue;
+    }
+
+    if (/^\s*>\s?/.test(line)) {
+      const quote = document.createElement('blockquote');
+      const quoteLines = [];
+      while (index < lines.length && /^\s*>\s?/.test(lines[index])) {
+        quoteLines.push(lines[index].replace(/^\s*>\s?/, ''));
+        index += 1;
+      }
+      appendInlineLines(quote, quoteLines);
+      container.appendChild(quote);
+      continue;
+    }
+
+    const listMatch = line.match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);
+    if (listMatch) {
+      const ordered = Boolean(listMatch[2]);
+      const list = document.createElement(ordered ? 'ol' : 'ul');
+      while (index < lines.length) {
+        const itemMatch = lines[index].match(/^\s*(?:([-+*])|(\d+)\.)\s+(.+)$/);
+        if (!itemMatch || Boolean(itemMatch[2]) !== ordered) break;
+        const item = document.createElement('li');
+        let itemText = itemMatch[3];
+        const taskMatch = !ordered ? itemText.match(/^\[([ xX])\]\s*(.*)$/) : null;
+        if (taskMatch) {
+          item.classList.add('markdown-task-item');
+          const marker = document.createElement('span');
+          marker.className = 'markdown-task-marker';
+          marker.textContent = taskMatch[1].toLowerCase() === 'x' ? '☑' : '☐';
+          marker.setAttribute('aria-hidden', 'true');
+          item.appendChild(marker);
+          itemText = taskMatch[2];
+        }
+        appendInlineScratchpadMarkdown(item, itemText);
+        list.appendChild(item);
+        index += 1;
+      }
+      container.appendChild(list);
+      continue;
+    }
+
+    const paragraphLines = [];
+    while (index < lines.length && lines[index].trim() && !isScratchpadMarkdownBlockStart(lines[index])) {
+      paragraphLines.push(lines[index]);
+      index += 1;
+    }
+    if (paragraphLines.length === 0) {
+      paragraphLines.push(line);
+      index += 1;
+    }
+    const paragraph = document.createElement('p');
+    appendInlineLines(paragraph, paragraphLines);
+    container.appendChild(paragraph);
+  }
+}
+
+function isScratchpadMarkdownBlockStart(line) {
+  return /^\s*(?:```|#{1,3}\s+|>\s?|(?:[-+*]|\d+\.)\s+|---+\s*$|___+\s*$|\*\*\*+\s*$)/.test(line);
+}
+
+function appendInlineLines(container, lines) {
+  lines.forEach((line, lineIndex) => {
+    if (lineIndex > 0) container.appendChild(document.createElement('br'));
+    appendInlineScratchpadMarkdown(container, line);
+  });
+}
+
+function appendInlineScratchpadMarkdown(container, text, depth = 0) {
+  if (!text || depth > 8) {
+    container.appendChild(document.createTextNode(text || ''));
+    return;
+  }
+
+  const tokenMatchers = [
+    { type: 'markdown-link', regex: /\[([^\]]+)\]\(((?:https?:\/\/|www\.)[^\s)]+)\)/i },
+    { type: 'code', regex: /`([^`\n]+)`/ },
+    { type: 'strong', regex: /\*\*(.+?)\*\*/ },
+    { type: 'strong', regex: /__(.+?)__/ },
+    { type: 'strike', regex: /~~(.+?)~~/ },
+    { type: 'emphasis', regex: /\*([^*\n]+)\*/ },
+    { type: 'emphasis', regex: /_([^_\n]+)_/ },
+    { type: 'url', regex: /(?:https?:\/\/|www\.)[^\s<>"'，。！？；：、（）【】「」『』]+/i }
+  ];
+
+  let remaining = text;
+  while (remaining) {
+    let nextToken = null;
+    tokenMatchers.forEach((matcher, priority) => {
+      const match = remaining.match(matcher.regex);
+      if (!match) return;
+      if (!nextToken || match.index < nextToken.match.index || (match.index === nextToken.match.index && priority < nextToken.priority)) {
+        nextToken = { ...matcher, match, priority };
+      }
+    });
+
+    if (!nextToken) {
+      container.appendChild(document.createTextNode(remaining));
+      break;
+    }
+
+    const { type, match } = nextToken;
+    if (match.index > 0) container.appendChild(document.createTextNode(remaining.slice(0, match.index)));
+    const rawToken = match[0];
+
+    if (type === 'markdown-link') {
+      const anchor = createSafeScratchpadAnchor(match[2], match[1]);
+      container.appendChild(anchor || document.createTextNode(rawToken));
+    } else if (type === 'url') {
+      const trailingMatch = rawToken.match(/[.,!?;:)\]}>]+$/);
+      const trailingText = trailingMatch ? trailingMatch[0] : '';
+      const linkText = trailingText ? rawToken.slice(0, -trailingText.length) : rawToken;
+      const anchor = createSafeScratchpadAnchor(linkText, linkText);
+      container.appendChild(anchor || document.createTextNode(linkText));
+      if (trailingText) container.appendChild(document.createTextNode(trailingText));
+    } else if (type === 'code') {
+      const code = document.createElement('code');
+      code.textContent = match[1];
+      container.appendChild(code);
+    } else {
+      const tagName = type === 'strong' ? 'strong' : type === 'strike' ? 'del' : 'em';
+      const element = document.createElement(tagName);
+      appendInlineScratchpadMarkdown(element, match[1], depth + 1);
+      container.appendChild(element);
+    }
+
+    remaining = remaining.slice(match.index + rawToken.length);
+  }
+}
+
+function createSafeScratchpadAnchor(rawUrl, label) {
+  const href = rawUrl.toLowerCase().startsWith('www.') ? `https://${rawUrl}` : rawUrl;
+  try {
+    const parsedUrl = new URL(href);
+    if (parsedUrl.protocol !== 'http:' && parsedUrl.protocol !== 'https:') return null;
+    const anchor = document.createElement('a');
+    anchor.href = parsedUrl.href;
+    anchor.target = '_blank';
+    anchor.rel = 'noopener noreferrer';
+    anchor.textContent = label;
+    anchor.title = `開啟 ${label}`;
+    return anchor;
+  } catch (error) {
+    return null;
   }
 }
 

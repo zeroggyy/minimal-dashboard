@@ -1863,6 +1863,102 @@ body {
   white-space: pre-wrap;
 }
 
+.scratchpad-note-text a {
+  color: inherit;
+  text-decoration: none;
+  border-bottom: 1px solid var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+
+.scratchpad-note-text a:hover {
+  color: var(--text-secondary);
+  border-bottom-color: var(--text-primary);
+}
+
+.scratchpad-markdown > :first-child { margin-top: 0; }
+.scratchpad-markdown > :last-child { margin-bottom: 0; }
+
+.scratchpad-markdown p {
+  margin: 0 0 8px;
+}
+
+.scratchpad-markdown h3,
+.scratchpad-markdown h4,
+.scratchpad-markdown h5 {
+  margin: 14px 0 7px;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-weight: 600;
+  line-height: 1.35;
+}
+
+.scratchpad-markdown h3 { font-size: 1.18rem; }
+.scratchpad-markdown h4 { font-size: 1.05rem; }
+.scratchpad-markdown h5 { font-size: 0.95rem; }
+
+.scratchpad-markdown ul,
+.scratchpad-markdown ol {
+  margin: 6px 0 10px;
+  padding-left: 22px;
+}
+
+.scratchpad-markdown li {
+  margin: 3px 0;
+  padding-left: 2px;
+}
+
+.scratchpad-markdown .markdown-task-item {
+  list-style: none;
+  margin-left: -20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.markdown-task-marker {
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+}
+
+.scratchpad-markdown blockquote {
+  margin: 8px 0 10px;
+  padding: 4px 0 4px 12px;
+  border-left: 2px solid var(--border-color);
+  color: var(--text-secondary);
+}
+
+.scratchpad-markdown pre {
+  margin: 8px 0 12px;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.025);
+  white-space: pre;
+}
+
+.scratchpad-markdown code {
+  padding: 1px 4px;
+  background: rgba(0, 0, 0, 0.045);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 0.82em;
+}
+
+.scratchpad-markdown pre code {
+  padding: 0;
+  background: transparent;
+  font-size: 0.78rem;
+}
+
+.scratchpad-markdown hr {
+  margin: 12px 0;
+  border: 0;
+  border-top: 1px dashed var(--border-color);
+}
+
+.scratchpad-markdown strong { font-weight: 700; }
+.scratchpad-markdown del { color: var(--text-secondary); }
+
 .scratchpad-note-image-frame {
   width: min(100%, 560px);
   margin-top: 10px;
