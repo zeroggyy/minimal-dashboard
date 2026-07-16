@@ -76,6 +76,11 @@ const OAUTH_SCOPE_VERSION = 'sheets-read-v4';
 const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const SCRATCHPAD_STORAGE_KEY = 'scratchpad_notes';
 const SCRATCHPAD_DRIVE_FILE_NAME = 'scratchpad.json';
+const SCRATCHPAD_IMAGE_DB_NAME = 'minimal_dashboard_scratchpad_images';
+const SCRATCHPAD_IMAGE_STORE_NAME = 'images';
+const SCRATCHPAD_IMAGE_MAX_SOURCE_BYTES = 15 * 1024 * 1024;
+const SCRATCHPAD_IMAGE_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
+const SCRATCHPAD_IMAGE_MAX_EDGE = 1600;
 const SUBSCRIPTION_SETTINGS_KEY = 'subscription_sheet_settings';
 const SUBSCRIPTION_CACHE_KEY = 'subscription_reminder_cache';
 
@@ -97,6 +102,9 @@ let scratchpadDriveFileId = null;
 let scratchpadSyncTimer = null;
 let scratchpadSyncInProgress = false;
 let scratchpadSyncQueued = false;
+let scratchpadPendingImage = null;
+let scratchpadImageDatabasePromise = null;
+const scratchpadImageObjectUrls = new Map();
 let subscriptionSettings = null;
 let subscriptionReminders = [];
 let subscriptionCacheUpdatedAt = null;
@@ -636,9 +644,9 @@ function initScratchpad() {
     scratchpadNotes = [];
   }
 
-  form.addEventListener('submit', (event) => {
+  form.addEventListener('submit', async (event) => {
     event.preventDefault();
-    addScratchpadNote(input.value);
+    await addScratchpadNote(input.value);
   });
 
   input.addEventListener('keydown', (event) => {
@@ -646,6 +654,25 @@ function initScratchpad() {
       event.preventDefault();
       form.requestSubmit();
     }
+  });
+
+  input.addEventListener('paste', (event) => {
+    const imageItem = Array.from(event.clipboardData?.items || [])
+      .find(item => item.kind === 'file' && item.type.startsWith('image/'));
+    if (!imageItem) return;
+
+    const imageFile = imageItem.getAsFile();
+    if (!imageFile) return;
+    event.preventDefault();
+    prepareScratchpadPastedImage(imageFile).catch(error => {
+      console.error('Unable to prepare pasted scratchpad image:', error);
+      alert(error.message || '無法處理這張圖片，請改用 JPG、PNG 或 WebP。');
+    });
+  });
+
+  document.getElementById('scratchpad-paste-preview-remove')?.addEventListener('click', () => {
+    clearScratchpadPendingImage();
+    input.focus();
   });
 
   list.addEventListener('click', (event) => {
@@ -701,26 +728,186 @@ function initScratchpad() {
   updateScratchpadSyncStatus(googleAccessToken ? 'syncing' : 'local');
 }
 
-function addScratchpadNote(rawText) {
+async function prepareScratchpadPastedImage(file) {
+  const supportedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!supportedTypes.includes(file.type)) {
+    throw new Error('目前支援 JPG、PNG 與 WebP 圖片。');
+  }
+  if (file.size > SCRATCHPAD_IMAGE_MAX_SOURCE_BYTES) {
+    throw new Error('原始圖片請控制在 15 MB 以內。');
+  }
+
+  const form = document.getElementById('scratchpad-form');
+  const submitButton = form?.querySelector('.scratchpad-submit-btn');
+  if (submitButton) submitButton.disabled = true;
+  form?.classList.add('processing-image');
+
+  try {
+    const compressed = await compressScratchpadImage(file);
+    if (compressed.blob.size > SCRATCHPAD_IMAGE_MAX_UPLOAD_BYTES) {
+      throw new Error('圖片壓縮後仍超過 5 MB，請改用尺寸較小的圖片。');
+    }
+
+    clearScratchpadPendingImage();
+    const previewUrl = URL.createObjectURL(compressed.blob);
+    scratchpadPendingImage = {
+      blob: compressed.blob,
+      previewUrl,
+      width: compressed.width,
+      height: compressed.height,
+      mimeType: compressed.blob.type || 'image/webp',
+      originalName: file.name || 'pasted-image'
+    };
+    renderScratchpadPendingImage();
+  } finally {
+    form?.classList.remove('processing-image');
+    if (submitButton) submitButton.disabled = false;
+  }
+}
+
+async function compressScratchpadImage(file) {
+  const bitmap = await createImageBitmap(file);
+  try {
+    const scale = Math.min(1, SCRATCHPAD_IMAGE_MAX_EDGE / Math.max(bitmap.width, bitmap.height));
+    const width = Math.max(1, Math.round(bitmap.width * scale));
+    const height = Math.max(1, Math.round(bitmap.height * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = width;
+    canvas.height = height;
+    const context = canvas.getContext('2d', { alpha: true });
+    if (!context) throw new Error('瀏覽器無法建立圖片畫布。');
+    context.drawImage(bitmap, 0, 0, width, height);
+    const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/webp', 0.82));
+    if (!blob) throw new Error('圖片壓縮失敗。');
+    return { blob, width, height };
+  } finally {
+    bitmap.close();
+  }
+}
+
+function renderScratchpadPendingImage() {
+  const preview = document.getElementById('scratchpad-paste-preview');
+  const image = document.getElementById('scratchpad-paste-preview-image');
+  const info = document.getElementById('scratchpad-paste-preview-info');
+  if (!preview || !image || !info || !scratchpadPendingImage) return;
+
+  image.src = scratchpadPendingImage.previewUrl;
+  info.textContent = `${scratchpadPendingImage.width} × ${scratchpadPendingImage.height} · ${formatFileSize(scratchpadPendingImage.blob.size)}`;
+  preview.classList.remove('hidden');
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function clearScratchpadPendingImage() {
+  if (scratchpadPendingImage?.previewUrl) URL.revokeObjectURL(scratchpadPendingImage.previewUrl);
+  scratchpadPendingImage = null;
+  const preview = document.getElementById('scratchpad-paste-preview');
+  const image = document.getElementById('scratchpad-paste-preview-image');
+  if (image) image.removeAttribute('src');
+  preview?.classList.add('hidden');
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function openScratchpadImageDatabase() {
+  if (scratchpadImageDatabasePromise) return scratchpadImageDatabasePromise;
+  scratchpadImageDatabasePromise = new Promise((resolve, reject) => {
+    const request = indexedDB.open(SCRATCHPAD_IMAGE_DB_NAME, 1);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains(SCRATCHPAD_IMAGE_STORE_NAME)) {
+        database.createObjectStore(SCRATCHPAD_IMAGE_STORE_NAME, { keyPath: 'id' });
+      }
+    };
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = () => reject(request.error || new Error('Unable to open image storage'));
+  });
+  return scratchpadImageDatabasePromise;
+}
+
+async function putScratchpadImageBlob(id, blob) {
+  const database = await openScratchpadImageDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(SCRATCHPAD_IMAGE_STORE_NAME, 'readwrite');
+    transaction.objectStore(SCRATCHPAD_IMAGE_STORE_NAME).put({ id, blob, updatedAt: new Date().toISOString() });
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('Unable to save image'));
+    transaction.onabort = () => reject(transaction.error || new Error('Unable to save image'));
+  });
+}
+
+async function getScratchpadImageBlob(id) {
+  if (!id) return null;
+  const database = await openScratchpadImageDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(SCRATCHPAD_IMAGE_STORE_NAME, 'readonly');
+    const request = transaction.objectStore(SCRATCHPAD_IMAGE_STORE_NAME).get(id);
+    request.onsuccess = () => resolve(request.result?.blob || null);
+    request.onerror = () => reject(request.error || new Error('Unable to read image'));
+  });
+}
+
+async function deleteScratchpadImageBlob(id) {
+  if (!id) return;
+  const database = await openScratchpadImageDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = database.transaction(SCRATCHPAD_IMAGE_STORE_NAME, 'readwrite');
+    transaction.objectStore(SCRATCHPAD_IMAGE_STORE_NAME).delete(id);
+    transaction.oncomplete = () => resolve();
+    transaction.onerror = () => reject(transaction.error || new Error('Unable to delete image'));
+    transaction.onabort = () => reject(transaction.error || new Error('Unable to delete image'));
+  });
+}
+
+async function addScratchpadNote(rawText) {
   const input = document.getElementById('scratchpad-input');
   const text = rawText.trim();
-  if (!text) return;
+  if (!text && !scratchpadPendingImage) return;
+
+  const id = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  let attachment = null;
+  if (scratchpadPendingImage) {
+    const localId = `scratchpad-image-${id}`;
+    try {
+      await putScratchpadImageBlob(localId, scratchpadPendingImage.blob);
+    } catch (error) {
+      console.error('Unable to store scratchpad image locally:', error);
+      alert('無法在本機保存圖片，這則閃念尚未建立。');
+      return;
+    }
+    attachment = {
+      type: 'image',
+      localId,
+      driveFileId: null,
+      driveDeletedAt: null,
+      mimeType: scratchpadPendingImage.mimeType,
+      name: `${localId}.webp`,
+      size: scratchpadPendingImage.blob.size,
+      width: scratchpadPendingImage.width,
+      height: scratchpadPendingImage.height
+    };
+  }
 
   scratchpadNotes.unshift({
-    id: typeof crypto !== 'undefined' && crypto.randomUUID
-      ? crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    id,
     text,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     deletedAt: null,
     convertedTo: null,
-    conversions: []
+    conversions: [],
+    attachment
   });
 
   saveScratchpadNotes();
   renderScratchpadNotes();
   input.value = '';
+  clearScratchpadPendingImage();
   input.focus();
   scheduleScratchpadDriveSync();
 }
@@ -734,6 +921,8 @@ function renderScratchpadNotes() {
   const emptyState = document.getElementById('scratchpad-empty');
   if (!list || !emptyState) return;
 
+  scratchpadImageObjectUrls.forEach(url => URL.revokeObjectURL(url));
+  scratchpadImageObjectUrls.clear();
   list.innerHTML = '';
   const visibleNotes = scratchpadNotes.filter(note => !note.deletedAt);
   emptyState.classList.toggle('hidden', visibleNotes.length > 0);
@@ -744,6 +933,7 @@ function renderScratchpadNotes() {
     const noteElement = document.createElement('article');
     noteElement.className = 'scratchpad-note';
     noteElement.dataset.noteId = note.id;
+    if (note.attachment?.type === 'image') noteElement.classList.add('has-image');
 
     const row = document.createElement('div');
     row.className = 'scratchpad-note-row';
@@ -754,7 +944,20 @@ function renderScratchpadNotes() {
     const textElement = document.createElement('div');
     textElement.className = 'scratchpad-note-text';
     textElement.textContent = note.text;
-    content.appendChild(textElement);
+    if (note.text) content.appendChild(textElement);
+
+    if (note.attachment?.type === 'image' && !note.attachment.driveDeletedAt) {
+      const imageFrame = document.createElement('div');
+      imageFrame.className = 'scratchpad-note-image-frame';
+      imageFrame.dataset.state = 'loading';
+      const image = document.createElement('img');
+      image.className = 'scratchpad-note-image';
+      image.alt = note.text || '閃念圖片';
+      image.hidden = true;
+      imageFrame.appendChild(image);
+      content.appendChild(imageFrame);
+      hydrateScratchpadNoteImage(note, imageFrame, image);
+    }
 
     if (note.conversions.length > 0) {
       const conversionMeta = document.createElement('div');
@@ -779,7 +982,7 @@ function renderScratchpadNotes() {
       type: 'task',
       icon: 'list-checks',
       label: '加入 Google Tasks',
-      disabled: note.conversions.some(conversion => conversion.type === 'task')
+      disabled: !note.text || note.conversions.some(conversion => conversion.type === 'task')
     });
 
     const calendarButton = createScratchpadActionButton({
@@ -787,7 +990,7 @@ function renderScratchpadNotes() {
       type: 'calendar',
       icon: 'calendar-plus',
       label: '加入 Google Calendar',
-      disabled: note.conversions.some(conversion => conversion.type === 'calendar')
+      disabled: !note.text || note.conversions.some(conversion => conversion.type === 'calendar')
     });
 
     const deleteButton = document.createElement('button');
@@ -807,6 +1010,46 @@ function renderScratchpadNotes() {
 
   if (typeof lucide !== 'undefined') {
     lucide.createIcons();
+  }
+}
+
+async function hydrateScratchpadNoteImage(note, frame, image) {
+  try {
+    let blob = await getScratchpadImageBlob(note.attachment.localId);
+    if (!blob && note.attachment.driveFileId && googleAccessToken) {
+      const response = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(note.attachment.driveFileId)}?alt=media`,
+        { headers: { 'Authorization': `Bearer ${googleAccessToken}` } }
+      );
+      await throwForGoogleApiError(response, 'Unable to download scratchpad image');
+      blob = await response.blob();
+      await putScratchpadImageBlob(note.attachment.localId, blob);
+    }
+
+    if (!blob) {
+      frame.dataset.state = 'error';
+      frame.textContent = googleAccessToken ? '圖片暫時無法載入' : '重新連線後載入圖片';
+      return;
+    }
+
+    const objectUrl = URL.createObjectURL(blob);
+    if (!image.isConnected) {
+      URL.revokeObjectURL(objectUrl);
+      return;
+    }
+    const previousUrl = scratchpadImageObjectUrls.get(note.id);
+    if (previousUrl) URL.revokeObjectURL(previousUrl);
+    scratchpadImageObjectUrls.set(note.id, objectUrl);
+    image.src = objectUrl;
+    image.hidden = false;
+    frame.dataset.state = 'ready';
+  } catch (error) {
+    console.error(`Unable to render scratchpad image ${note.id}:`, error);
+    if (error.status === 401) handleAuthExpired();
+    if (frame.isConnected) {
+      frame.dataset.state = 'error';
+      frame.textContent = '圖片載入失敗';
+    }
   }
 }
 
@@ -995,7 +1238,23 @@ function normalizeScratchpadNote(note) {
     convertedTo: note.convertedTo || null,
     conversions: Array.isArray(note.conversions)
       ? note.conversions
-      : (note.convertedTo ? [note.convertedTo] : [])
+      : (note.convertedTo ? [note.convertedTo] : []),
+    attachment: normalizeScratchpadAttachment(note.attachment, note.id)
+  };
+}
+
+function normalizeScratchpadAttachment(attachment, noteId) {
+  if (!attachment || attachment.type !== 'image') return null;
+  return {
+    type: 'image',
+    localId: attachment.localId || `scratchpad-image-${noteId}`,
+    driveFileId: attachment.driveFileId || null,
+    driveDeletedAt: attachment.driveDeletedAt || null,
+    mimeType: attachment.mimeType || 'image/webp',
+    name: attachment.name || `scratchpad-image-${noteId}.webp`,
+    size: Number(attachment.size) || 0,
+    width: Number(attachment.width) || 0,
+    height: Number(attachment.height) || 0
   };
 }
 
@@ -1009,7 +1268,9 @@ function mergeScratchpadNotes(localNotes, remoteNotes) {
       const existing = mergedById.get(note.id);
       const noteUpdatedAt = new Date(note.updatedAt).getTime();
       const existingUpdatedAt = existing ? new Date(existing.updatedAt).getTime() : -1;
-      if (!existing || noteUpdatedAt >= existingUpdatedAt) {
+      // Local notes are inserted first; keep them when timestamps tie so
+      // locally cached attachment metadata is not replaced by an older manifest.
+      if (!existing || noteUpdatedAt > existingUpdatedAt) {
         mergedById.set(note.id, note);
       }
     });
@@ -1062,9 +1323,15 @@ async function syncScratchpadWithDrive() {
 
     scratchpadNotes = mergeScratchpadNotes(scratchpadNotes, remoteNotes);
     mergeSubscriptionSettings(remoteSubscriptionSettings);
+    await syncScratchpadImagesWithDrive();
     saveScratchpadNotes();
     renderScratchpadNotes();
     scratchpadDriveFileId = await uploadScratchpadToDrive(scratchpadDriveFileId);
+    const cleanedRemoteImages = await cleanupDeletedScratchpadImagesWithDrive();
+    if (cleanedRemoteImages) {
+      saveScratchpadNotes();
+      scratchpadDriveFileId = await uploadScratchpadToDrive(scratchpadDriveFileId);
+    }
     updateScratchpadSyncStatus('synced', new Date());
   } catch (error) {
     updateScratchpadSyncStatus('error');
@@ -1114,12 +1381,94 @@ async function findScratchpadDriveFile() {
   return data.files && data.files.length > 0 ? data.files[0].id : null;
 }
 
+async function syncScratchpadImagesWithDrive() {
+  for (const note of scratchpadNotes) {
+    const attachment = note.attachment;
+    if (!attachment || attachment.type !== 'image') continue;
+    if (note.deletedAt) continue;
+
+    if (!attachment.driveFileId) {
+      const blob = await getScratchpadImageBlob(attachment.localId);
+      if (!blob) throw new Error(`Missing local image for scratchpad note ${note.id}`);
+      const driveFile = await uploadScratchpadImageToDrive(note, blob);
+      note.attachment = {
+        ...attachment,
+        driveFileId: driveFile.id,
+        driveDeletedAt: null,
+        size: Number(driveFile.size) || attachment.size || blob.size
+      };
+    }
+  }
+}
+
+async function cleanupDeletedScratchpadImagesWithDrive() {
+  let manifestChanged = false;
+  for (const note of scratchpadNotes) {
+    const attachment = note.attachment;
+    if (!note.deletedAt || !attachment || attachment.type !== 'image') continue;
+
+    if (attachment.driveFileId && !attachment.driveDeletedAt) {
+      await deleteScratchpadImageFromDrive(attachment.driveFileId);
+      note.attachment = { ...attachment, driveDeletedAt: new Date().toISOString() };
+      manifestChanged = true;
+    }
+    await deleteScratchpadImageBlob(attachment.localId);
+  }
+  return manifestChanged;
+}
+
+async function uploadScratchpadImageToDrive(note, blob) {
+  const attachment = note.attachment;
+  const boundary = `scratchpad_image_${Date.now()}_${Math.random().toString(16).slice(2)}`;
+  const metadata = {
+    name: attachment.name || `scratchpad-image-${note.id}.webp`,
+    parents: ['appDataFolder'],
+    appProperties: { scratchpadNoteId: note.id }
+  };
+  const requestBody = new Blob([
+    `--${boundary}\r\n`,
+    'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+    JSON.stringify(metadata),
+    `\r\n--${boundary}\r\n`,
+    `Content-Type: ${attachment.mimeType || blob.type || 'image/webp'}\r\n\r\n`,
+    blob,
+    `\r\n--${boundary}--\r\n`
+  ], { type: `multipart/related; boundary=${boundary}` });
+
+  const response = await fetch(
+    'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,size',
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${googleAccessToken}`,
+        'Content-Type': `multipart/related; boundary=${boundary}`
+      },
+      body: requestBody
+    }
+  );
+  await throwForGoogleApiError(response, 'Unable to upload scratchpad image');
+  return response.json();
+}
+
+async function deleteScratchpadImageFromDrive(fileId) {
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`,
+    {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+    }
+  );
+  if (!response.ok && response.status !== 404) {
+    await throwForGoogleApiError(response, 'Unable to delete scratchpad image');
+  }
+}
+
 async function uploadScratchpadToDrive(fileId) {
   const metadata = fileId
     ? { name: SCRATCHPAD_DRIVE_FILE_NAME }
     : { name: SCRATCHPAD_DRIVE_FILE_NAME, parents: ['appDataFolder'] };
   const fileContent = JSON.stringify({
-    version: 2,
+    version: 3,
     updatedAt: new Date().toISOString(),
     notes: scratchpadNotes,
     subscriptionSettings
@@ -1658,6 +2007,7 @@ async function syncAllGoogleTasks() {
 function renderTodos() {
   const containerOverdueSection = document.getElementById('todo-section-overdue');
   const listOverdue = document.getElementById('todo-list-overdue');
+  const overdueCount = document.getElementById('overdue-count');
   const listToday = document.getElementById('todo-list');
   const containerBacklogSection = document.getElementById('todo-section-backlog');
   const listBacklog = document.getElementById('todo-list-backlog');
@@ -1665,6 +2015,7 @@ function renderTodos() {
 
   // Render Overdue Section
   listOverdue.innerHTML = '';
+  if (overdueCount) overdueCount.textContent = overdueTodos.length > 0 ? `/ ${overdueTodos.length} 個未完` : '';
   if (overdueTodos.length > 0) {
     containerOverdueSection.classList.remove('hidden');
     overdueTodos.forEach(todo => {
@@ -2431,9 +2782,15 @@ function renderTimeline() {
   if (!allDayContainer) {
     allDayContainer = document.createElement('div');
     allDayContainer.id = 'timeline-allday-container';
-    // Insert after subtitle but before the timeline container spine
-    const subtitle = panelTimeline.querySelector('.card-subtitle');
-    subtitle.parentNode.insertBefore(allDayContainer, subtitle.nextSibling);
+  }
+
+  // Keep the card structure stable whether or not all-day events exist:
+  // subtitle -> date navigation -> all-day summary -> timeline.
+  const dateNavigation = document.getElementById('timeline-date-navigation');
+  const subtitle = panelTimeline.querySelector('.card-subtitle');
+  const insertionAnchor = dateNavigation || subtitle;
+  if (insertionAnchor?.nextElementSibling !== allDayContainer) {
+    insertionAnchor?.insertAdjacentElement('afterend', allDayContainer);
   }
   allDayContainer.innerHTML = '';
   

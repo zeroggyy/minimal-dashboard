@@ -33,7 +33,7 @@
 
 - 讀取使用者的所有 Google Task Lists，並支援 API 分頁。
 - **今日焦點**：顯示今天到期的任務，最多保留三項，維持真正的專注範圍。
-- **過期未完**：集中顯示已超過到期日但尚未完成的任務，可摺疊收合。
+- **過期未完**：集中顯示已超過到期日但尚未完成的任務，標題會顯示未完數量並可摺疊收合。
 - **SOMEDAY / 有空解決**：從沒有設定到期日的未完成任務中隨機挑選一項。
   - 顯示候選任務數量。
   - 可點擊「換一個」重新抽選。
@@ -64,7 +64,10 @@
 
 - 按 `Enter` 或 `+` 快速新增閃念。
 - `Shift + Enter` 可在同一則閃念內換行。
-- 未登入時保存在 `localStorage`。
+- 可直接在輸入框貼上 JPG、PNG 或 WebP 圖片，預覽後建立純圖片或圖文閃念。
+- 圖片會先壓縮並保存在瀏覽器 IndexedDB；登入後以獨立檔案同步到 Google Drive App Data。
+- 刪除圖片閃念時會一併移除對應的雲端圖片檔案。
+- 未登入時，文字與圖片中繼資料保存在 `localStorage`，圖片檔案保存在 IndexedDB。
 - 登入後同步到 Google Drive 的 `appDataFolder`，可在其他裝置登入同一帳號後讀取。
 - 顯示獨立同步狀態：
   - 僅本機
@@ -120,6 +123,7 @@ Google Calendar ────→ 今日時間軸
 Google Sheets ──────→ 七日內訂閱提醒
 Google Drive App Data ↔ 閃念與資料來源設定
 localStorage ───────→ 本機快取與離線顯示
+IndexedDB ──────────→ 閃念圖片的本機 Blob 快取
 sessionStorage ─────→ 當前分頁的 Google Access Token
 ```
 
@@ -154,6 +158,7 @@ minimal-dashboard/
 | Google Drive API v3 | 使用 `appDataFolder` 保存應用資料 |
 | Google Sheets API v4 | 唯讀取訂閱服務資料 |
 | localStorage | 閃念、設定、Tasks 與訂閱資料快取 |
+| IndexedDB | 閃念圖片的本機二進位檔案快取 |
 | sessionStorage | Access Token 與 OAuth scope 版本 |
 | Lucide Icons | 介面圖示 |
 

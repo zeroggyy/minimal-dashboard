@@ -144,6 +144,7 @@
             <span class="overdue-title-text-group">
               <i data-lucide="alert-circle" class="overdue-alert-icon"></i>
               OVERDUE / 過期未完
+              <span id="overdue-count" class="overdue-count"></span>
             </span>
           </div>
           <div id="wrapper-overdue" class="todo-list-wrapper collapsed">
@@ -220,13 +221,25 @@
 
         <!-- Input Area -->
         <form id="scratchpad-form" class="scratchpad-form">
-          <textarea
-            id="scratchpad-input"
-            class="scratchpad-textarea"
-            placeholder="輸入你的閃念、臨時備忘、或任何想法... 按 Enter 送出"
-            rows="2"
-            aria-label="閃念輸入"
-          ></textarea>
+          <div class="scratchpad-input-shell">
+            <textarea
+              id="scratchpad-input"
+              class="scratchpad-textarea"
+              placeholder="輸入文字或直接貼上圖片... 按 Enter 送出"
+              rows="2"
+              aria-label="閃念輸入"
+            ></textarea>
+            <div id="scratchpad-paste-preview" class="scratchpad-paste-preview hidden" aria-live="polite">
+              <img id="scratchpad-paste-preview-image" alt="準備加入的圖片預覽">
+              <div class="scratchpad-paste-preview-meta">
+                <strong>圖片已準備</strong>
+                <span id="scratchpad-paste-preview-info"></span>
+              </div>
+              <button id="scratchpad-paste-preview-remove" type="button" aria-label="移除準備加入的圖片" title="移除圖片">
+                <i data-lucide="x"></i>
+              </button>
+            </div>
+          </div>
           <button type="submit" class="scratchpad-submit-btn" aria-label="新增閃念">
             <i data-lucide="plus"></i>
           </button>
