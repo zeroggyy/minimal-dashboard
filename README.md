@@ -39,7 +39,8 @@
   - 可點擊「換一個」重新抽選。
   - 同一次瀏覽期間保持穩定，不會因重新渲染任意跳動。
 - 可快速新增今天的任務。
-- 可勾選完成並同步回 Google Tasks。
+- 勾選完成時會先開啟「完成紀錄」卡片；可選填補充說明，再完成並同步回 Google Tasks。
+- 每次完成都會立即追加至 Google Drive 的每日 Markdown 日誌；網路或授權暫時失敗時保留在本機佇列，重新登入、同步或回到頁面時自動重試，且以事件 ID 避免重複寫入。
 - 點擊任務可開啟編輯風格詳情視窗，查看或修改標題與備註。
 - 可開啟 Google Tasks 原始來源。
 - 未登入時使用 `localStorage` 保存本機快取。
@@ -59,11 +60,16 @@
   - 建立者
   - 詳細說明與原始連結
 - 無行程時顯示安靜的空狀態畫面。
+- 時程卡片的核取方塊位於時間欄之前；可將行程標記為「已寫入日記」，選填補充說明後加入 Daily Log。
+  - 已寫入的行程仍保留在時間軸，只會降低視覺權重並顯示勾選狀態。
+  - 不會修改、完成、取消或刪除 Google Calendar 中的行程。
+  - 勾選狀態會保存於 Dashboard 並透過 Google Drive App Data 同步；重複行程會依每一次發生的日期分開記錄。
 
 ### 閃念膠囊 · Scratchpad
 
 - 按 `Enter` 或 `+` 快速新增閃念。
 - `Shift + Enter` 可在同一則閃念內換行。
+- 閃念清單固定顯示兩行摘要；點擊後以獨立卡片閱讀完整內容、圖片與相關操作，維持首頁版面簡潔。
 - 閃念中的 `http://`、`https://` 與 `www.` 網址會自動轉成可點擊的新分頁連結。
 - 支援安全的常用 Markdown：標題、粗體、斜體、刪除線、行內／區塊程式碼、引用、清單、核取清單與 `[文字](網址)`。
 - 每則閃念可原地展開編輯原始文字或 Markdown；儲存後保留既有圖片與 Google Tasks／Calendar 轉換紀錄，並重新同步到 Google Drive。
@@ -89,6 +95,15 @@
   - 指定可寫入的日曆
 - 轉換成功後保留原始閃念，顯示 Google 項目的快捷連結並避免重複轉換。
 - 刪除閃念只會刪除膠囊內的筆記，不會刪除已建立的 Google Task 或 Calendar 行程。
+- 可將閃念標記為完成；完成的筆記會保留在可展開的「已完成筆記」區域 30 天，並可選填說明寫入 Daily Log。
+- 完成滿 30 天後，筆記會自動從封存區移除；若含有圖片，下一次成功同步時也會刪除對應的 Google Drive 圖片檔案。Daily Log 不受此清理規則影響。
+
+### Daily Log · Google Drive Markdown
+
+- 首次寫入時自動在 Google Drive 建立可見的 `Dashboard Daily Log` 資料夾。
+- 每日建立或更新一份 `YYYY-MM-DD.md`，以子彈筆記格式記錄完成時間、英文來源標記（`Task`、`Flash`）與選填補充說明。
+- 完成含圖片的閃念時，圖片會複製到 `Dashboard Daily Log/assets/`，並在當日 Markdown 寫入私人的 Google Drive 圖片連結；原始閃念圖片可依 30 天封存規則清理，日誌附件則保留。
+- 每筆日誌含有隱藏事件 ID，確保重試或重新整理不會造成重複紀錄。
 
 ### 即將續訂 · Google Sheets
 
@@ -124,7 +139,8 @@
 Google Tasks ───────→ 今日焦點／過期未完／有空解決
 Google Calendar ────→ 今日時間軸
 Google Sheets ──────→ 七日內訂閱提醒
-Google Drive App Data ↔ 閃念與資料來源設定
+Google Drive App Data ↔ 閃念、資料來源設定與 Calendar 日記勾選狀態
+Google Drive ───────→ Daily Log 每日 Markdown 檔案
 localStorage ───────→ 本機快取與離線顯示
 IndexedDB ──────────→ 閃念圖片的本機 Blob 快取
 sessionStorage ─────→ 當前分頁的 Google Access Token
@@ -158,7 +174,7 @@ minimal-dashboard/
 | Google Identity Services | OAuth 2.0 瀏覽器授權 |
 | Google Tasks API v1 | 讀取、新增、完成與編輯任務 |
 | Google Calendar API v3 | 讀取行程與建立 Calendar Event |
-| Google Drive API v3 | 使用 `appDataFolder` 保存應用資料 |
+| Google Drive API v3 | 使用 `appDataFolder` 保存應用資料，並以 `drive.file` 建立可見的 Daily Log Markdown |
 | Google Sheets API v4 | 唯讀取訂閱服務資料 |
 | localStorage | 閃念、設定、Tasks 與訂閱資料快取 |
 | IndexedDB | 閃念圖片的本機二進位檔案快取 |
@@ -183,6 +199,7 @@ https://www.googleapis.com/auth/calendar.events
 https://www.googleapis.com/auth/calendar.calendarlist.readonly
 https://www.googleapis.com/auth/tasks
 https://www.googleapis.com/auth/drive.appdata
+https://www.googleapis.com/auth/drive.file
 https://www.googleapis.com/auth/spreadsheets.readonly
 ```
 

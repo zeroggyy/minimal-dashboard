@@ -65,6 +65,7 @@ const SCOPES = [
   'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
   'https://www.googleapis.com/auth/tasks',
   'https://www.googleapis.com/auth/drive.appdata',
+  'https://www.googleapis.com/auth/drive.file',
   'https://www.googleapis.com/auth/spreadsheets.readonly'
 ].join(' ');
 
@@ -72,7 +73,7 @@ const SCOPES = [
 const STORAGE_TOKEN_KEY = 'google_oauth_token';
 const STORAGE_SCOPE_VERSION_KEY = 'google_oauth_scope_version';
 const STORAGE_TOKEN_EXPIRES_AT_KEY = 'google_oauth_token_expires_at';
-const OAUTH_SCOPE_VERSION = 'sheets-read-v4';
+const OAUTH_SCOPE_VERSION = 'daily-log-drive-v1';
 const AUTO_SYNC_INTERVAL_MS = 10 * 60 * 1000;
 const SCRATCHPAD_STORAGE_KEY = 'scratchpad_notes';
 const SCRATCHPAD_DRIVE_FILE_NAME = 'scratchpad.json';
@@ -81,8 +82,14 @@ const SCRATCHPAD_IMAGE_STORE_NAME = 'images';
 const SCRATCHPAD_IMAGE_MAX_SOURCE_BYTES = 15 * 1024 * 1024;
 const SCRATCHPAD_IMAGE_MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 const SCRATCHPAD_IMAGE_MAX_EDGE = 1600;
+const SCRATCHPAD_DELETED_NOTE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+const SCRATCHPAD_COMPLETED_NOTE_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
 const SUBSCRIPTION_SETTINGS_KEY = 'subscription_sheet_settings';
 const SUBSCRIPTION_CACHE_KEY = 'subscription_reminder_cache';
+const DAILY_LOG_SETTINGS_KEY = 'daily_log_settings';
+const DAILY_LOG_PENDING_KEY = 'daily_log_pending_events';
+const DAILY_LOG_FOLDER_NAME = 'Dashboard Daily Log';
+const CALENDAR_JOURNAL_STORAGE_KEY = 'calendar_journal_entries';
 
 // Global variables for Google integration
 let googleAccessToken = null;
@@ -108,6 +115,11 @@ const scratchpadImageObjectUrls = new Map();
 let subscriptionSettings = null;
 let subscriptionReminders = [];
 let subscriptionCacheUpdatedAt = null;
+let dailyLogSettings = null;
+let pendingDailyLogEvents = [];
+let dailyLogSyncInProgress = false;
+let pendingCompletionAction = null;
+let calendarJournalEntries = {};
 
 // DOM Elements
 const currentDateEl = document.getElementById('current-date');
@@ -129,6 +141,8 @@ let todayTodos = [];
 let backlogTodos = [];
 let selectedBacklogTodoId = null;
 let scratchpadNotes = [];
+let activeScratchpadNoteId = null;
+let scratchpadPreviewResizeTimer = null;
 let overlayIsEditing = false;
 let activeOverlayTodo = null;
 
@@ -139,6 +153,9 @@ document.addEventListener('DOMContentLoaded', () => {
   initTimeline();
   initDashboardTabs();
   initScratchpad();
+  initScratchpadDetailOverlay();
+  initDailyLog();
+  initCompletionLogOverlay();
   initSubscriptionReminders();
   initGoogleAuth();
   initTodoAccordion();
@@ -168,9 +185,13 @@ document.addEventListener('DOMContentLoaded', () => {
       }
       detailOverlay.classList.add('hidden');
     });
-    // Click backdrop to close
+    // Only close when the pointer starts on the backdrop. This protects text
+    // selection that starts inside the card and ends outside its boundary.
+    detailOverlay.addEventListener('pointerdown', (e) => {
+      detailOverlay.dataset.backdropPointerDown = String(e.target === detailOverlay);
+    });
     detailOverlay.addEventListener('click', (e) => {
-      if (e.target === detailOverlay) {
+      if (e.target === detailOverlay && detailOverlay.dataset.backdropPointerDown === 'true') {
         if (overlayIsEditing) {
           toggleOverlayEditMode(false);
         }
@@ -455,8 +476,8 @@ function renderSubscriptionReminders() {
   const refreshButton = document.getElementById('subscription-refresh-btn');
   if (!panel || !list || !emptyState || !summary || !sheetLink || !refreshButton) return;
 
-  // Keep first-time setup discoverable, but hide the whole card after setup
-  // when there are no renewal reminders in the configured time window.
+  // Keep first-time setup discoverable, but hide the whole task subsection
+  // after setup when there are no renewal reminders in the configured time window.
   panel.classList.toggle('hidden', Boolean(subscriptionSettings) && subscriptionReminders.length === 0);
 
   list.innerHTML = '';
@@ -476,7 +497,7 @@ function renderSubscriptionReminders() {
     list.classList.remove('hidden');
     emptyState.classList.add('hidden');
     const total = subscriptionReminders.reduce((sum, item) => sum + item.amountValue, 0);
-    summary.textContent = `/ ${subscriptionReminders.length} 項 · ${formatTwd(total)}`;
+    summary.textContent = `${subscriptionReminders.length} 項 · ${formatTwd(total)}`;
     subscriptionReminders.forEach(item => list.appendChild(createSubscriptionReminderItem(item)));
   }
 
@@ -604,9 +625,6 @@ function updateSubscriptionStatus(state, message) {
   if (!status) return;
   status.dataset.state = state;
   status.textContent = message;
-  if (state === 'error') {
-    document.getElementById('subscription-reminder-panel')?.classList.remove('hidden');
-  }
 }
 
 function showSubscriptionSettingsError(message) {
@@ -625,11 +643,253 @@ function getSubscriptionErrorMessage(error) {
   return '無法讀取試算表，請稍後重試。';
 }
 
+// Daily Log / Google Drive Markdown journal
+function initDailyLog() {
+  try {
+    dailyLogSettings = JSON.parse(localStorage.getItem(DAILY_LOG_SETTINGS_KEY) || 'null') || {};
+    const savedEvents = JSON.parse(localStorage.getItem(DAILY_LOG_PENDING_KEY) || '[]');
+    pendingDailyLogEvents = Array.isArray(savedEvents) ? savedEvents.filter(event => event?.id && event?.completedAt) : [];
+  } catch (error) {
+    console.warn('Unable to restore pending Daily Log events:', error);
+    dailyLogSettings = {};
+    pendingDailyLogEvents = [];
+  }
+}
+
+function saveDailyLogState() {
+  localStorage.setItem(DAILY_LOG_SETTINGS_KEY, JSON.stringify(dailyLogSettings || {}));
+  localStorage.setItem(DAILY_LOG_PENDING_KEY, JSON.stringify(pendingDailyLogEvents));
+}
+
+function createDailyLogEvent(source, title, note = '', attachment = null, details = []) {
+  const completedAt = new Date().toISOString();
+  const id = typeof crypto !== 'undefined' && crypto.randomUUID
+    ? crypto.randomUUID()
+    : `daily-log-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return { id, source, title: String(title || '').trim(), note: String(note || '').trim(), completedAt, attachment, details };
+}
+
+function queueDailyLogEvent(event) {
+  if (!event?.id || pendingDailyLogEvents.some(item => item.id === event.id)) return;
+  pendingDailyLogEvents.push(event);
+  saveDailyLogState();
+  flushPendingDailyLogs().catch(error => console.error('Unable to sync Daily Log:', error));
+}
+
+function getLocalDateParts(value) {
+  const date = new Date(value);
+  const pad = number => String(number).padStart(2, '0');
+  return {
+    key: `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`,
+    heading: `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())}`,
+    time: `${pad(date.getHours())}:${pad(date.getMinutes())}`
+  };
+}
+
+async function ensureDailyLogFolder() {
+  if (dailyLogSettings?.folderId) return dailyLogSettings.folderId;
+  const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${googleAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: DAILY_LOG_FOLDER_NAME, mimeType: 'application/vnd.google-apps.folder' })
+  });
+  await throwForGoogleApiError(response, 'Unable to create Daily Log folder');
+  const folder = await response.json();
+  dailyLogSettings = { ...(dailyLogSettings || {}), folderId: folder.id, folderName: DAILY_LOG_FOLDER_NAME };
+  saveDailyLogState();
+  return folder.id;
+}
+
+async function ensureDailyLogAssetsFolder(folderId) {
+  if (dailyLogSettings?.assetsFolderId) return dailyLogSettings.assetsFolderId;
+  const response = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${googleAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: 'assets', mimeType: 'application/vnd.google-apps.folder', parents: [folderId] })
+  });
+  await throwForGoogleApiError(response, 'Unable to create Daily Log assets folder');
+  const folder = await response.json();
+  dailyLogSettings = { ...(dailyLogSettings || {}), assetsFolderId: folder.id };
+  saveDailyLogState();
+  return folder.id;
+}
+
+async function findOrCreateDailyLogFile(folderId, dateParts) {
+  const fileName = `${dateParts.key}.md`;
+  const query = encodeURIComponent(`'${folderId}' in parents and name = '${fileName.replace(/'/g, "\\'")}' and trashed = false`);
+  const lookup = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}&fields=files(id,name)&pageSize=10`, {
+    headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+  });
+  await throwForGoogleApiError(lookup, 'Unable to find Daily Log file');
+  const existing = (await lookup.json()).files?.[0];
+  if (existing) return existing.id;
+
+  const created = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${googleAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: fileName, mimeType: 'text/markdown', parents: [folderId] })
+  });
+  await throwForGoogleApiError(created, 'Unable to create Daily Log file');
+  const file = await created.json();
+  const initialContent = `# ${dateParts.heading} / Daily Log\n\n## Completed\n`;
+  const uploaded = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${googleAccessToken}`, 'Content-Type': 'text/markdown; charset=utf-8' },
+    body: initialContent
+  });
+  await throwForGoogleApiError(uploaded, 'Unable to initialise Daily Log file');
+  return file.id;
+}
+
+function formatDailyLogEvent(event) {
+  const parts = getLocalDateParts(event.completedAt);
+  const title = event.title.replace(/[\r\n]+/g, ' ').replace(/\|/g, '\\|');
+  const noteLines = event.note.split(/\r?\n/).map(line => line.trim()).filter(Boolean);
+  const details = Array.isArray(event.details)
+    ? event.details.map(detail => String(detail || '').trim()).filter(Boolean).map(detail => `\n  - ${detail}`).join('')
+    : '';
+  const note = noteLines.length ? `\n  - ${noteLines.join('\n    ')}` : '';
+  const image = event.dailyLogImage?.url ? `\n  - [Image attachment](${event.dailyLogImage.url})` : '';
+  return `\n- [x] ${parts.time}｜${event.source}｜${title}${details}${note}${image}\n<!-- dashboard-log:${event.id} -->\n`;
+}
+
+async function getDailyLogAttachmentBlob(attachment) {
+  let blob = await getScratchpadImageBlob(attachment.localId);
+  if (blob || !attachment.driveFileId) return blob;
+  const response = await fetch(
+    `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(attachment.driveFileId)}?alt=media`,
+    { headers: { 'Authorization': `Bearer ${googleAccessToken}` } }
+  );
+  await throwForGoogleApiError(response, 'Unable to download Flash image for Daily Log');
+  blob = await response.blob();
+  await putScratchpadImageBlob(attachment.localId, blob);
+  return blob;
+}
+
+async function copyDailyLogImageAttachment(event, folderId, dateParts) {
+  if (event.dailyLogImage?.url || event.attachment?.type !== 'image') return;
+  const blob = await getDailyLogAttachmentBlob(event.attachment);
+  if (!blob) throw new Error('Flash image is not available for Daily Log');
+  const assetsFolderId = await ensureDailyLogAssetsFolder(folderId);
+  const extension = event.attachment.mimeType === 'image/png' ? 'png'
+    : event.attachment.mimeType === 'image/jpeg' ? 'jpg'
+      : 'webp';
+  const created = await fetch('https://www.googleapis.com/drive/v3/files', {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${googleAccessToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: `${dateParts.key}_flash_${event.id}.${extension}`,
+      mimeType: event.attachment.mimeType || blob.type || 'image/webp',
+      parents: [assetsFolderId]
+    })
+  });
+  await throwForGoogleApiError(created, 'Unable to create Daily Log image');
+  const file = await created.json();
+  const upload = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(file.id)}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${googleAccessToken}`, 'Content-Type': event.attachment.mimeType || blob.type || 'image/webp' },
+    body: blob
+  });
+  await throwForGoogleApiError(upload, 'Unable to upload Daily Log image');
+  event.dailyLogImage = { fileId: file.id, url: `https://drive.google.com/open?id=${encodeURIComponent(file.id)}` };
+  saveDailyLogState();
+}
+
+async function appendDailyLogEvent(event) {
+  const dateParts = getLocalDateParts(event.completedAt);
+  const folderId = await ensureDailyLogFolder();
+  const fileId = await findOrCreateDailyLogFile(folderId, dateParts);
+  const download = await fetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {
+    headers: { 'Authorization': `Bearer ${googleAccessToken}` }
+  });
+  await throwForGoogleApiError(download, 'Unable to read Daily Log file');
+  const currentContent = await download.text();
+  if (currentContent.includes(`<!-- dashboard-log:${event.id} -->`)) return;
+  await copyDailyLogImageAttachment(event, folderId, dateParts);
+
+  const upload = await fetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media`, {
+    method: 'PATCH',
+    headers: { 'Authorization': `Bearer ${googleAccessToken}`, 'Content-Type': 'text/markdown; charset=utf-8' },
+    body: `${currentContent.trimEnd()}${formatDailyLogEvent(event)}`
+  });
+  await throwForGoogleApiError(upload, 'Unable to update Daily Log file');
+}
+
+async function flushPendingDailyLogs() {
+  if (!googleAccessToken || dailyLogSyncInProgress || pendingDailyLogEvents.length === 0) return;
+  dailyLogSyncInProgress = true;
+  try {
+    while (pendingDailyLogEvents.length && googleAccessToken) {
+      const event = pendingDailyLogEvents[0];
+      try {
+        await appendDailyLogEvent(event);
+        pendingDailyLogEvents.shift();
+        saveDailyLogState();
+      } catch (error) {
+        console.warn('Daily Log event will retry later:', error);
+        break;
+      }
+    }
+  } finally {
+    dailyLogSyncInProgress = false;
+  }
+}
+
+function initCompletionLogOverlay() {
+  const overlay = document.getElementById('completion-log-overlay');
+  if (!overlay) return;
+  overlay.addEventListener('pointerdown', event => {
+    overlay.dataset.backdropPointerDown = String(event.target === overlay);
+  });
+  overlay.addEventListener('click', event => {
+    if ((event.target === overlay && overlay.dataset.backdropPointerDown === 'true') || event.target.closest('[data-completion-action="cancel"]')) closeCompletionLogOverlay();
+  });
+  overlay.querySelector('form')?.addEventListener('submit', event => {
+    event.preventDefault();
+    confirmCompletionLog(true);
+  });
+  overlay.querySelector('[data-completion-action="skip"]')?.addEventListener('click', () => confirmCompletionLog(false));
+}
+
+function openCompletionLogOverlay({ source, title, attachment = null, details = [], onConfirm }) {
+  const overlay = document.getElementById('completion-log-overlay');
+  const titleElement = document.getElementById('completion-log-item-title');
+  const timeElement = document.getElementById('completion-log-time');
+  const textarea = document.getElementById('completion-log-note');
+  if (!overlay || !titleElement || !timeElement || !textarea) return;
+  const completedAt = new Date().toISOString();
+  pendingCompletionAction = { source, title, attachment, details, completedAt, onConfirm };
+  titleElement.textContent = title;
+  timeElement.textContent = new Date(completedAt).toLocaleString('zh-TW', { hour: '2-digit', minute: '2-digit', year: 'numeric', month: '2-digit', day: '2-digit' });
+  textarea.value = '';
+  overlay.classList.remove('hidden');
+  overlay.setAttribute('aria-hidden', 'false');
+  textarea.focus();
+}
+
+function closeCompletionLogOverlay() {
+  const overlay = document.getElementById('completion-log-overlay');
+  pendingCompletionAction = null;
+  overlay?.classList.add('hidden');
+  overlay?.setAttribute('aria-hidden', 'true');
+}
+
+function confirmCompletionLog(includeNote) {
+  const action = pendingCompletionAction;
+  const textarea = document.getElementById('completion-log-note');
+  if (!action) return;
+  const note = includeNote ? textarea?.value.trim() || '' : '';
+  closeCompletionLogOverlay();
+  action.onConfirm?.(action.completedAt);
+  queueDailyLogEvent({ ...createDailyLogEvent(action.source, action.title, note, action.attachment, action.details), completedAt: action.completedAt });
+}
+
 // Scratchpad / Flash Capsule (local-first, no Google sync required)
 function initScratchpad() {
   const form = document.getElementById('scratchpad-form');
   const input = document.getElementById('scratchpad-input');
   const list = document.getElementById('scratchpad-list');
+  const completedList = document.getElementById('scratchpad-completed-list');
   const retryButton = document.getElementById('scratchpad-sync-retry');
 
   if (!form || !input || !list) return;
@@ -639,6 +899,7 @@ function initScratchpad() {
     scratchpadNotes = Array.isArray(savedNotes)
       ? savedNotes.map(normalizeScratchpadNote).filter(Boolean)
       : [];
+    if (expireCompletedScratchpadNotes()) saveScratchpadNotes();
   } catch (error) {
     console.warn('Unable to read saved scratchpad notes:', error);
     scratchpadNotes = [];
@@ -675,60 +936,16 @@ function initScratchpad() {
     input.focus();
   });
 
-  list.addEventListener('click', (event) => {
-    const editButton = event.target.closest('[data-action="edit-scratchpad-note"]');
-    if (editButton) {
-      openScratchpadEditPanel(editButton.dataset.noteId);
-      return;
-    }
+  const openScratchpadNoteFromList = (event) => {
+    const openButton = event.target.closest('[data-action="open-scratchpad-note"]');
+    if (openButton) openScratchpadDetailOverlay(openButton.dataset.noteId);
+  };
+  list.addEventListener('click', openScratchpadNoteFromList);
+  completedList?.addEventListener('click', openScratchpadNoteFromList);
 
-    const deleteButton = event.target.closest('[data-action="delete-scratchpad-note"]');
-    if (deleteButton) {
-      const deletedAt = new Date().toISOString();
-      scratchpadNotes = scratchpadNotes.map(note => note.id === deleteButton.dataset.noteId
-        ? { ...note, updatedAt: deletedAt, deletedAt }
-        : note);
-      saveScratchpadNotes();
-      renderScratchpadNotes();
-      scheduleScratchpadDriveSync();
-      return;
-    }
-
-    const convertButton = event.target.closest('[data-action="convert-scratchpad-note"]');
-    if (convertButton) {
-      if (!googleAccessToken) {
-        document.getElementById('scratchpad-auth-notice')?.classList.remove('hidden');
-        authenticateWithGoogle();
-        return;
-      }
-      openScratchpadConvertPanel(convertButton.dataset.noteId, convertButton.dataset.convertType);
-      return;
-    }
-
-    const cancelButton = event.target.closest('[data-action="cancel-scratchpad-convert"]');
-    if (cancelButton) {
-      cancelButton.closest('.scratchpad-convert-panel')?.remove();
-      return;
-    }
-
-    const cancelEditButton = event.target.closest('[data-action="cancel-scratchpad-edit"]');
-    if (cancelEditButton) {
-      cancelEditButton.closest('.scratchpad-edit-panel')?.remove();
-    }
-  });
-
-  list.addEventListener('submit', (event) => {
-    const editForm = event.target.closest('.scratchpad-edit-panel');
-    if (editForm) {
-      event.preventDefault();
-      submitScratchpadEdit(editForm);
-      return;
-    }
-
-    const convertForm = event.target.closest('.scratchpad-convert-panel');
-    if (!convertForm) return;
-    event.preventDefault();
-    submitScratchpadConversion(convertForm);
+  window.addEventListener('resize', () => {
+    window.clearTimeout(scratchpadPreviewResizeTimer);
+    scratchpadPreviewResizeTimer = window.setTimeout(updateScratchpadPreviewOverflow, 100);
   });
 
   if (retryButton) {
@@ -938,107 +1155,108 @@ function saveScratchpadNotes() {
 function renderScratchpadNotes() {
   const list = document.getElementById('scratchpad-list');
   const emptyState = document.getElementById('scratchpad-empty');
+  const completedContainer = document.getElementById('scratchpad-completed');
+  const completedList = document.getElementById('scratchpad-completed-list');
+  const completedCount = document.getElementById('scratchpad-completed-count');
   if (!list || !emptyState) return;
 
   scratchpadImageObjectUrls.forEach(url => URL.revokeObjectURL(url));
   scratchpadImageObjectUrls.clear();
   list.innerHTML = '';
-  const visibleNotes = scratchpadNotes.filter(note => !note.deletedAt);
-  emptyState.classList.toggle('hidden', visibleNotes.length > 0);
+  completedList?.replaceChildren();
+  const activeNotes = scratchpadNotes.filter(note => !note.deletedAt && !note.completedAt);
+  const completedNotes = scratchpadNotes.filter(note => !note.deletedAt && note.completedAt);
+  emptyState.classList.toggle('hidden', activeNotes.length > 0);
 
-  visibleNotes
-    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
-    .forEach(note => {
-    const noteElement = document.createElement('article');
-    noteElement.className = 'scratchpad-note';
-    noteElement.dataset.noteId = note.id;
-    if (note.attachment?.type === 'image') noteElement.classList.add('has-image');
-
-    const row = document.createElement('div');
-    row.className = 'scratchpad-note-row';
-
-    const content = document.createElement('div');
-    content.className = 'scratchpad-note-content';
-
-    const textElement = document.createElement('div');
-    textElement.className = 'scratchpad-note-text';
-    renderScratchpadMarkdown(textElement, note.text);
-    if (note.text) content.appendChild(textElement);
-
-    if (note.attachment?.type === 'image' && !note.attachment.driveDeletedAt) {
-      const imageFrame = document.createElement('div');
-      imageFrame.className = 'scratchpad-note-image-frame';
-      imageFrame.dataset.state = 'loading';
-      const image = document.createElement('img');
-      image.className = 'scratchpad-note-image';
-      image.alt = note.text || '閃念圖片';
-      image.hidden = true;
-      imageFrame.appendChild(image);
-      content.appendChild(imageFrame);
-      hydrateScratchpadNoteImage(note, imageFrame, image);
-    }
-
-    if (note.conversions.length > 0) {
-      const conversionMeta = document.createElement('div');
-      conversionMeta.className = 'scratchpad-conversion-meta';
-      note.conversions.forEach(conversion => {
-        const link = document.createElement('a');
-        link.href = conversion.url || '#';
-        link.target = '_blank';
-        link.rel = 'noopener noreferrer';
-        link.textContent = conversion.type === 'task' ? '已加入 Tasks ↗' : '已加入 Calendar ↗';
-        if (!conversion.url) link.removeAttribute('href');
-        conversionMeta.appendChild(link);
-      });
-      content.appendChild(conversionMeta);
-    }
-
-    const actions = document.createElement('div');
-    actions.className = 'scratchpad-note-actions';
-
-    const taskButton = createScratchpadActionButton({
-      noteId: note.id,
-      type: 'task',
-      icon: 'list-checks',
-      label: '加入 Google Tasks',
-      disabled: !note.text || note.conversions.some(conversion => conversion.type === 'task')
-    });
-
-    const calendarButton = createScratchpadActionButton({
-      noteId: note.id,
-      type: 'calendar',
-      icon: 'calendar-plus',
-      label: '加入 Google Calendar',
-      disabled: !note.text || note.conversions.some(conversion => conversion.type === 'calendar')
-    });
-
-    const editButton = document.createElement('button');
-    editButton.type = 'button';
-    editButton.className = 'scratchpad-action-btn';
-    editButton.dataset.action = 'edit-scratchpad-note';
-    editButton.dataset.noteId = note.id;
-    editButton.setAttribute('aria-label', '編輯閃念');
-    editButton.title = '編輯';
-    editButton.innerHTML = '<i data-lucide="pencil"></i>';
-
-    const deleteButton = document.createElement('button');
-    deleteButton.type = 'button';
-    deleteButton.className = 'scratchpad-action-btn btn-delete';
-    deleteButton.dataset.action = 'delete-scratchpad-note';
-    deleteButton.dataset.noteId = note.id;
-    deleteButton.setAttribute('aria-label', '刪除閃念');
-    deleteButton.title = '刪除';
-    deleteButton.innerHTML = '<i data-lucide="trash-2"></i>';
-
-    actions.append(taskButton, calendarButton, editButton, deleteButton);
-    row.append(content, actions);
-    noteElement.appendChild(row);
-    list.appendChild(noteElement);
-    });
+  appendScratchpadNoteSummaries(list, activeNotes, false);
+  if (completedContainer && completedList && completedCount) {
+    completedContainer.classList.toggle('hidden', completedNotes.length === 0);
+    completedCount.textContent = `/ ${completedNotes.length}`;
+    appendScratchpadNoteSummaries(completedList, completedNotes, true);
+  }
 
   if (typeof lucide !== 'undefined') {
     lucide.createIcons();
   }
+  updateScratchpadPreviewOverflow();
+}
+
+function appendScratchpadNoteSummaries(container, notes, isCompleted) {
+  notes
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .forEach((note, index) => {
+    const noteElement = document.createElement('article');
+    noteElement.className = `scratchpad-note${isCompleted ? ' is-completed' : ''}`;
+    noteElement.dataset.noteId = note.id;
+    const summaryButton = document.createElement('button');
+    summaryButton.type = 'button';
+    summaryButton.className = 'scratchpad-note-summary';
+    summaryButton.dataset.action = 'open-scratchpad-note';
+    summaryButton.dataset.noteId = note.id;
+    summaryButton.setAttribute('aria-label', '開啟閃念內容');
+
+    const preview = document.createElement('span');
+    preview.className = 'scratchpad-note-preview';
+    preview.textContent = getScratchpadNotePreview(note);
+
+    const sequence = document.createElement('span');
+    sequence.className = 'scratchpad-note-sequence';
+    sequence.textContent = String(index + 1).padStart(2, '0');
+    sequence.setAttribute('aria-hidden', 'true');
+
+    const indicator = document.createElement('span');
+    indicator.className = 'scratchpad-note-indicator';
+    indicator.innerHTML = note.attachment?.type === 'image'
+      ? '<i data-lucide="image"></i>'
+      : '<i data-lucide="chevron-right"></i>';
+
+    summaryButton.append(sequence, preview, indicator);
+    noteElement.appendChild(summaryButton);
+    container.appendChild(noteElement);
+    });
+}
+
+function getScratchpadNotePreview(note) {
+  const text = (note.text || '')
+    .replace(/\r\n?/g, '\n')
+    .replace(/```[\s\S]*?```/g, '程式碼內容')
+    .replace(/!\[([^\]]*)\]\([^\s)]+(?:\s+[^)]*)?\)/g, '$1')
+    .replace(/\[([^\]]+)\]\((?:[^()]+|\([^()]*\))*\)/g, '$1')
+    .replace(/^\s*[-*+]\s+\[x\]\s+/gim, '✓ ')
+    .replace(/^\s*[-*+]\s+\[\s\]\s+/gm, '□ ')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s*>\s?/gm, '')
+    .replace(/\*\*|__|~~|`/g, '')
+    .replace(/(^|\s)[*_]([^*_]+)[*_](?=\s|$)/g, '$1$2')
+    .replace(/\n+/g, ' ')
+    .trim();
+  if (text) return text;
+  return note.attachment?.type === 'image' ? '圖片閃念' : '未命名閃念';
+}
+
+function updateScratchpadPreviewOverflow() {
+  window.requestAnimationFrame(() => {
+    document.querySelectorAll('.scratchpad-note-preview').forEach(preview => {
+      const style = window.getComputedStyle(preview);
+      const measure = document.createElement('span');
+      measure.className = 'scratchpad-note-preview-measure';
+      measure.textContent = preview.textContent;
+      measure.style.width = `${preview.clientWidth}px`;
+      measure.style.fontFamily = style.fontFamily;
+      measure.style.fontSize = style.fontSize;
+      measure.style.fontWeight = style.fontWeight;
+      measure.style.letterSpacing = style.letterSpacing;
+      measure.style.lineHeight = style.lineHeight;
+      document.body.appendChild(measure);
+
+      const lineHeight = Number.parseFloat(style.lineHeight);
+      const exceedsTwoLines = measure.getBoundingClientRect().height > (lineHeight * 2) + 1;
+      const isLongSummary = preview.textContent.length > 90;
+      const isTruncated = exceedsTwoLines || isLongSummary;
+      preview.dataset.truncated = String(isTruncated);
+      measure.remove();
+    });
+  });
 }
 
 function renderScratchpadMarkdown(container, text) {
@@ -1270,6 +1488,166 @@ async function hydrateScratchpadNoteImage(note, frame, image) {
   }
 }
 
+function initScratchpadDetailOverlay() {
+  const overlay = document.getElementById('scratchpad-detail-overlay');
+  if (!overlay) return;
+
+  overlay.addEventListener('pointerdown', event => {
+    overlay.dataset.backdropPointerDown = String(event.target === overlay);
+  });
+  overlay.addEventListener('click', event => {
+    if (event.target === overlay && overlay.dataset.backdropPointerDown === 'true') {
+      closeScratchpadDetailOverlay();
+      return;
+    }
+
+    const actionButton = event.target.closest('[data-scratchpad-detail-action]');
+    if (!actionButton || !activeScratchpadNoteId) return;
+    const action = actionButton.dataset.scratchpadDetailAction;
+
+    if (action === 'close') {
+      closeScratchpadDetailOverlay();
+    } else if (action === 'edit') {
+      openScratchpadEditPanel(activeScratchpadNoteId);
+    } else if (action === 'cancel-edit' || action === 'cancel-convert') {
+      openScratchpadDetailOverlay(activeScratchpadNoteId);
+    } else if (action === 'task' || action === 'calendar') {
+      if (!googleAccessToken) {
+        document.getElementById('scratchpad-auth-notice')?.classList.remove('hidden');
+        authenticateWithGoogle();
+        return;
+      }
+      openScratchpadConvertPanel(activeScratchpadNoteId, action);
+    } else if (action === 'complete') {
+      const note = scratchpadNotes.find(item => item.id === activeScratchpadNoteId && !item.deletedAt);
+      if (!note || note.completedAt) return;
+      openCompletionLogOverlay({
+        source: 'Flash',
+        title: getScratchpadNotePreview(note),
+        attachment: note.attachment ? { ...note.attachment } : null,
+        onConfirm: (completedAt) => {
+          scratchpadNotes = scratchpadNotes.map(item => item.id === note.id
+            ? { ...item, completedAt, updatedAt: completedAt }
+            : item);
+          saveScratchpadNotes();
+          renderScratchpadNotes();
+          scheduleScratchpadDriveSync();
+          closeScratchpadDetailOverlay();
+        }
+      });
+    } else if (action === 'delete') {
+      const deletedAt = new Date().toISOString();
+      scratchpadNotes = scratchpadNotes.map(note => note.id === activeScratchpadNoteId
+        ? { ...note, updatedAt: deletedAt, deletedAt }
+        : note);
+      saveScratchpadNotes();
+      renderScratchpadNotes();
+      scheduleScratchpadDriveSync();
+      closeScratchpadDetailOverlay();
+    }
+  });
+
+  overlay.addEventListener('submit', event => {
+    const editForm = event.target.closest('.scratchpad-edit-panel');
+    const convertForm = event.target.closest('.scratchpad-convert-panel');
+    if (!editForm && !convertForm) return;
+    event.preventDefault();
+    if (editForm) submitScratchpadEdit(editForm);
+    if (convertForm) submitScratchpadConversion(convertForm);
+  });
+
+  document.addEventListener('keydown', event => {
+    if (event.key !== 'Escape' || overlay.classList.contains('hidden')) return;
+    if (document.querySelector('.scratchpad-edit-panel')) {
+      openScratchpadDetailOverlay(activeScratchpadNoteId);
+    } else {
+      closeScratchpadDetailOverlay();
+    }
+  });
+}
+
+function openScratchpadDetailOverlay(noteId) {
+  const note = scratchpadNotes.find(item => item.id === noteId && !item.deletedAt);
+  const overlay = document.getElementById('scratchpad-detail-overlay');
+  const meta = document.getElementById('scratchpad-detail-meta');
+  const date = document.getElementById('scratchpad-detail-date');
+  const content = document.getElementById('scratchpad-detail-content');
+  const panel = document.getElementById('scratchpad-detail-panel');
+  const conversions = document.getElementById('scratchpad-detail-conversions');
+  const actions = document.getElementById('scratchpad-detail-actions');
+  if (!note || !overlay || !meta || !date || !content || !panel || !conversions || !actions) return;
+
+  const previousUrl = scratchpadImageObjectUrls.get(activeScratchpadNoteId);
+  if (previousUrl && activeScratchpadNoteId !== note.id) {
+    URL.revokeObjectURL(previousUrl);
+    scratchpadImageObjectUrls.delete(activeScratchpadNoteId);
+  }
+
+  activeScratchpadNoteId = note.id;
+  meta.textContent = note.attachment?.type === 'image' ? 'IMAGE NOTE / 圖片閃念' : 'FLASH NOTE / 閃念膠囊';
+  date.textContent = formatScratchpadNoteDate(note.updatedAt || note.createdAt);
+  content.replaceChildren();
+  panel.replaceChildren();
+  conversions.replaceChildren();
+  actions.hidden = false;
+
+  if (note.text) {
+    const text = document.createElement('div');
+    text.className = 'scratchpad-note-text scratchpad-detail-markdown';
+    renderScratchpadMarkdown(text, note.text);
+    content.appendChild(text);
+  }
+
+  if (note.attachment?.type === 'image' && !note.attachment.driveDeletedAt) {
+    const imageFrame = document.createElement('div');
+    imageFrame.className = 'scratchpad-note-image-frame scratchpad-detail-image-frame';
+    imageFrame.dataset.state = 'loading';
+    const image = document.createElement('img');
+    image.className = 'scratchpad-note-image';
+    image.alt = note.text || '閃念圖片';
+    image.hidden = true;
+    imageFrame.appendChild(image);
+    content.appendChild(imageFrame);
+    hydrateScratchpadNoteImage(note, imageFrame, image);
+  }
+
+  note.conversions.forEach(conversion => {
+    const link = document.createElement('a');
+    link.href = conversion.url || '#';
+    link.target = '_blank';
+    link.rel = 'noopener noreferrer';
+    link.textContent = conversion.type === 'task' ? '已加入 Tasks ↗' : '已加入 Calendar ↗';
+    if (!conversion.url) link.removeAttribute('href');
+    conversions.appendChild(link);
+  });
+
+  actions.querySelector('[data-scratchpad-detail-action="task"]').disabled = !note.text || note.conversions.some(item => item.type === 'task');
+  actions.querySelector('[data-scratchpad-detail-action="calendar"]').disabled = !note.text || note.conversions.some(item => item.type === 'calendar');
+  actions.querySelector('[data-scratchpad-detail-action="complete"]').disabled = Boolean(note.completedAt);
+  overlay.classList.remove('hidden');
+  overlay.setAttribute('aria-hidden', 'false');
+  if (typeof lucide !== 'undefined') lucide.createIcons();
+}
+
+function closeScratchpadDetailOverlay() {
+  const overlay = document.getElementById('scratchpad-detail-overlay');
+  const objectUrl = scratchpadImageObjectUrls.get(activeScratchpadNoteId);
+  if (objectUrl) {
+    URL.revokeObjectURL(objectUrl);
+    scratchpadImageObjectUrls.delete(activeScratchpadNoteId);
+  }
+  activeScratchpadNoteId = null;
+  overlay?.classList.add('hidden');
+  overlay?.setAttribute('aria-hidden', 'true');
+}
+
+function formatScratchpadNoteDate(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return '';
+  const pad = number => String(number).padStart(2, '0');
+  return `${date.getFullYear()}.${pad(date.getMonth() + 1)}.${pad(date.getDate())} · ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
 function createScratchpadActionButton({ noteId, type, icon, label, disabled }) {
   const button = document.createElement('button');
   button.type = 'button';
@@ -1285,10 +1663,9 @@ function createScratchpadActionButton({ noteId, type, icon, label, disabled }) {
 }
 
 function openScratchpadConvertPanel(noteId, type) {
-  document.querySelectorAll('.scratchpad-convert-panel, .scratchpad-edit-panel').forEach(panel => panel.remove());
   const note = scratchpadNotes.find(item => item.id === noteId && !item.deletedAt);
-  const noteElement = document.querySelector(`.scratchpad-note[data-note-id="${CSS.escape(noteId)}"]`);
-  if (!note || !noteElement) return;
+  const detailPanel = document.getElementById('scratchpad-detail-panel');
+  if (!note || !detailPanel) return;
 
   const today = formatLocalDateInput(new Date());
   const panel = document.createElement('form');
@@ -1306,7 +1683,7 @@ function openScratchpadConvertPanel(noteId, type) {
       <div class="convert-field"><label>到期日（選填）</label><input name="date" type="date" value=""></div>
       <div class="convert-field"><label>任務清單</label><select name="destination">${taskLists.map(list => `<option value="${escapeHtml(list.id)}">${escapeHtml(list.title)}</option>`).join('')}</select></div>
       <div class="convert-panel-actions">
-        <button class="convert-cancel-btn" data-action="cancel-scratchpad-convert" type="button">取消</button>
+        <button class="convert-cancel-btn" data-scratchpad-detail-action="cancel-convert" type="button">取消</button>
         <button class="convert-confirm-btn" type="submit">加入 Tasks</button>
       </div>`;
   } else {
@@ -1330,20 +1707,21 @@ function openScratchpadConvertPanel(noteId, type) {
       <div class="convert-field"><label>詳細資訊（選填）</label><textarea name="description" rows="3" placeholder="加入說明、連結或備註">${escapeHtml(note.text)}</textarea></div>
       <div class="convert-field"><label>日曆</label><select name="destination">${calendars.map(calendar => `<option value="${escapeHtml(calendar.id)}">${escapeHtml(calendar.summary)}</option>`).join('')}</select></div>
       <div class="convert-panel-actions">
-        <button class="convert-cancel-btn" data-action="cancel-scratchpad-convert" type="button">取消</button>
+        <button class="convert-cancel-btn" data-scratchpad-detail-action="cancel-convert" type="button">取消</button>
         <button class="convert-confirm-btn" type="submit">加入 Calendar</button>
       </div>`;
   }
 
-  noteElement.appendChild(panel);
+  detailPanel.replaceChildren(panel);
   if (typeof lucide !== 'undefined') lucide.createIcons();
 }
 
 function openScratchpadEditPanel(noteId) {
-  document.querySelectorAll('.scratchpad-convert-panel, .scratchpad-edit-panel').forEach(panel => panel.remove());
   const note = scratchpadNotes.find(item => item.id === noteId && !item.deletedAt);
-  const noteElement = document.querySelector(`.scratchpad-note[data-note-id="${CSS.escape(noteId)}"]`);
-  if (!note || !noteElement) return;
+  const content = document.getElementById('scratchpad-detail-content');
+  const panelTarget = document.getElementById('scratchpad-detail-panel');
+  const detailActions = document.getElementById('scratchpad-detail-actions');
+  if (!note || !content || !panelTarget || !detailActions) return;
 
   const panel = document.createElement('form');
   panel.className = 'scratchpad-edit-panel';
@@ -1374,7 +1752,7 @@ function openScratchpadEditPanel(noteId) {
   const cancelButton = document.createElement('button');
   cancelButton.type = 'button';
   cancelButton.className = 'scratchpad-edit-cancel';
-  cancelButton.dataset.action = 'cancel-scratchpad-edit';
+  cancelButton.dataset.scratchpadDetailAction = 'cancel-edit';
   cancelButton.textContent = '取消';
 
   const saveButton = document.createElement('button');
@@ -1385,12 +1763,14 @@ function openScratchpadEditPanel(noteId) {
   actions.append(cancelButton, saveButton);
   footer.append(hint, actions);
   panel.append(heading, textarea, footer);
-  noteElement.appendChild(panel);
+  content.replaceChildren(panel);
+  panelTarget.replaceChildren();
+  detailActions.hidden = true;
 
   textarea.addEventListener('keydown', event => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      panel.remove();
+      openScratchpadDetailOverlay(noteId);
       return;
     }
     if (event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
@@ -1420,7 +1800,7 @@ function submitScratchpadEdit(form) {
   textarea.setCustomValidity('');
 
   if (text === (note.text || '')) {
-    form.remove();
+    openScratchpadDetailOverlay(note.id);
     return;
   }
 
@@ -1431,6 +1811,7 @@ function submitScratchpadEdit(form) {
   saveScratchpadNotes();
   renderScratchpadNotes();
   scheduleScratchpadDriveSync();
+  openScratchpadDetailOverlay(note.id);
 }
 
 async function submitScratchpadConversion(form) {
@@ -1450,7 +1831,7 @@ async function submitScratchpadConversion(form) {
 
   submitButton.disabled = true;
   submitButton.textContent = '處理中…';
-  form.closest('.scratchpad-note')?.classList.add('sending');
+  form.closest('.scratchpad-detail-card')?.classList.add('sending');
 
   try {
     let conversion;
@@ -1518,11 +1899,12 @@ async function submitScratchpadConversion(form) {
     saveScratchpadNotes();
     renderScratchpadNotes();
     scheduleScratchpadDriveSync();
+    openScratchpadDetailOverlay(note.id);
   } catch (error) {
     console.error('Scratchpad conversion failed:', error);
     submitButton.disabled = false;
     submitButton.textContent = type === 'task' ? '加入 Tasks' : '加入 Calendar';
-    form.closest('.scratchpad-note')?.classList.remove('sending');
+    form.closest('.scratchpad-detail-card')?.classList.remove('sending');
     alert(type === 'task' ? '無法加入 Google Tasks，請稍後重試。' : '無法加入 Google Calendar，請稍後重試。');
   }
 }
@@ -1546,6 +1928,7 @@ function normalizeScratchpadNote(note) {
     createdAt,
     updatedAt: note.updatedAt || createdAt,
     deletedAt: note.deletedAt || null,
+    completedAt: note.completedAt || null,
     convertedTo: note.convertedTo || null,
     conversions: Array.isArray(note.conversions)
       ? note.conversions
@@ -1621,6 +2004,7 @@ async function syncScratchpadWithDrive() {
 
     let remoteNotes = [];
     let remoteSubscriptionSettings = null;
+    let remoteCalendarJournalEntries = null;
     if (scratchpadDriveFileId) {
       const response = await fetch(
         `https://www.googleapis.com/drive/v3/files/${encodeURIComponent(scratchpadDriveFileId)}?alt=media`,
@@ -1630,16 +2014,21 @@ async function syncScratchpadWithDrive() {
       const payload = await response.json();
       remoteNotes = Array.isArray(payload) ? payload : (payload.notes || []);
       remoteSubscriptionSettings = Array.isArray(payload) ? null : payload.subscriptionSettings;
+      remoteCalendarJournalEntries = Array.isArray(payload) ? null : payload.calendarJournalEntries;
     }
 
     scratchpadNotes = mergeScratchpadNotes(scratchpadNotes, remoteNotes);
     mergeSubscriptionSettings(remoteSubscriptionSettings);
+    const calendarJournalChanged = mergeCalendarJournalEntries(remoteCalendarJournalEntries);
+    const expiredCompletedNotes = expireCompletedScratchpadNotes();
     await syncScratchpadImagesWithDrive();
     saveScratchpadNotes();
     renderScratchpadNotes();
+    if (calendarJournalChanged) renderTimeline();
     scratchpadDriveFileId = await uploadScratchpadToDrive(scratchpadDriveFileId);
     const cleanedRemoteImages = await cleanupDeletedScratchpadImagesWithDrive();
-    if (cleanedRemoteImages) {
+    const purgedDeletedNotes = purgeExpiredDeletedScratchpadNotes();
+    if (expiredCompletedNotes || cleanedRemoteImages || purgedDeletedNotes) {
       saveScratchpadNotes();
       scratchpadDriveFileId = await uploadScratchpadToDrive(scratchpadDriveFileId);
     }
@@ -1654,6 +2043,31 @@ async function syncScratchpadWithDrive() {
       scheduleScratchpadDriveSync();
     }
   }
+}
+
+function expireCompletedScratchpadNotes() {
+  const cutoff = Date.now() - SCRATCHPAD_COMPLETED_NOTE_RETENTION_MS;
+  const deletedAt = new Date().toISOString();
+  let changed = false;
+  scratchpadNotes = scratchpadNotes.map(note => {
+    if (note.deletedAt || !note.completedAt) return note;
+    const completedAt = new Date(note.completedAt).getTime();
+    if (!Number.isFinite(completedAt) || completedAt > cutoff) return note;
+    changed = true;
+    return { ...note, deletedAt, updatedAt: deletedAt };
+  });
+  return changed;
+}
+
+function purgeExpiredDeletedScratchpadNotes() {
+  const cutoff = Date.now() - SCRATCHPAD_DELETED_NOTE_RETENTION_MS;
+  const notesBeforePurge = scratchpadNotes.length;
+  scratchpadNotes = scratchpadNotes.filter(note => {
+    if (!note.deletedAt) return true;
+    const deletedAt = new Date(note.deletedAt).getTime();
+    return !Number.isFinite(deletedAt) || deletedAt > cutoff;
+  });
+  return scratchpadNotes.length !== notesBeforePurge;
 }
 
 function updateScratchpadSyncStatus(state, syncedAt = null) {
@@ -1782,7 +2196,8 @@ async function uploadScratchpadToDrive(fileId) {
     version: 3,
     updatedAt: new Date().toISOString(),
     notes: scratchpadNotes,
-    subscriptionSettings
+    subscriptionSettings,
+    calendarJournalEntries
   });
   const boundary = `scratchpad_${Date.now()}_${Math.random().toString(16).slice(2)}`;
   const multipartBody = [
@@ -2002,6 +2417,10 @@ function runAutomaticGoogleSync() {
     return;
   }
 
+  if (pendingDailyLogEvents.length) {
+    flushPendingDailyLogs().catch(error => console.error('Automatic Daily Log retry failed:', error));
+  }
+
   const elapsed = Date.now() - googleLastSyncAt;
   if (!googleLastSyncAt || elapsed >= AUTO_SYNC_INTERVAL_MS) {
     syncGoogleData();
@@ -2076,6 +2495,13 @@ async function syncGoogleData() {
       googleSyncInProgress = false;
       return;
     }
+    hasSyncError = true;
+  }
+
+  try {
+    await flushPendingDailyLogs();
+  } catch (err) {
+    console.error('Syncing Daily Log failed:', err);
     hasSyncError = true;
   }
 
@@ -2737,6 +3163,22 @@ async function saveOverlayChanges() {
 }
 
 async function toggleTodo(id, listId, sectionClass) {
+  const collection = sectionClass === 'overdue' ? overdueTodos
+    : sectionClass === 'today' ? todayTodos
+      : backlogTodos;
+  const currentTask = collection.find(todo => todo.id === id);
+  if (currentTask && !currentTask.completed) {
+    openCompletionLogOverlay({
+      source: 'Task',
+      title: currentTask.text,
+      onConfirm: () => applyTodoToggle(id, listId, sectionClass)
+    });
+    return;
+  }
+  await applyTodoToggle(id, listId, sectionClass);
+}
+
+async function applyTodoToggle(id, listId, sectionClass) {
   let toggledTask = null;
   
   const mapper = (todo) => {
@@ -2948,9 +3390,24 @@ async function syncAllGoogleCalendars() {
 }
 
 function initTimeline() {
+  try {
+    const savedEntries = JSON.parse(localStorage.getItem(CALENDAR_JOURNAL_STORAGE_KEY) || '{}');
+    calendarJournalEntries = savedEntries && typeof savedEntries === 'object' && !Array.isArray(savedEntries) ? savedEntries : {};
+  } catch (error) {
+    console.warn('Unable to restore Calendar journal state:', error);
+    calendarJournalEntries = {};
+  }
+
   document.getElementById('timeline-prev-date')?.addEventListener('click', () => shiftTimelineDate(-1));
   document.getElementById('timeline-next-date')?.addEventListener('click', () => shiftTimelineDate(1));
   document.getElementById('timeline-date')?.addEventListener('click', returnTimelineToToday);
+  document.getElementById('panel-timeline')?.addEventListener('click', event => {
+    const journalButton = event.target.closest('[data-calendar-journal-event]');
+    if (!journalButton) return;
+    event.preventDefault();
+    event.stopPropagation();
+    requestCalendarJournal(journalButton.dataset.calendarJournalEvent, journalButton.dataset.calendarJournalCalendar);
+  }, true);
 
   // If not logged in, render default mock timeline list
   if (!googleAccessToken) {
@@ -2962,6 +3419,54 @@ function initTimeline() {
   }
   updateTimelineDateNavigation();
   renderTimeline();
+}
+
+function getCalendarJournalKey(event) {
+  const occurrence = event.startTimeObj instanceof Date
+    ? event.startTimeObj.toISOString()
+    : `${event.isAllDay ? 'all-day' : 'timed'}:${event.start || ''}:${event.end || ''}`;
+  return `${event.calendarId || 'calendar'}:${event.id}:${occurrence}`;
+}
+
+function isCalendarJournaled(event) {
+  return Boolean(calendarJournalEntries[getCalendarJournalKey(event)]);
+}
+
+function saveCalendarJournalEntries() {
+  localStorage.setItem(CALENDAR_JOURNAL_STORAGE_KEY, JSON.stringify(calendarJournalEntries));
+}
+
+function mergeCalendarJournalEntries(remoteEntries) {
+  if (!remoteEntries || typeof remoteEntries !== 'object' || Array.isArray(remoteEntries)) return false;
+  let changed = false;
+  Object.entries(remoteEntries).forEach(([key, remoteEntry]) => {
+    if (!remoteEntry?.journaledAt) return;
+    const localEntry = calendarJournalEntries[key];
+    if (!localEntry || new Date(remoteEntry.journaledAt).getTime() > new Date(localEntry.journaledAt).getTime()) {
+      calendarJournalEntries[key] = remoteEntry;
+      changed = true;
+    }
+  });
+  if (changed) saveCalendarJournalEntries();
+  return changed;
+}
+
+function requestCalendarJournal(eventId, calendarId = '') {
+  const event = googleEvents.find(item => item.id === eventId && (!calendarId || item.calendarId === calendarId));
+  if (!event || isCalendarJournaled(event)) return;
+  const schedule = event.isAllDay ? 'Scheduled: All day' : `Scheduled: ${event.start}–${event.end}`;
+  const details = [schedule, event.calendarName ? `Calendar: ${event.calendarName}` : '', event.location ? `Location: ${event.location}` : ''];
+  openCompletionLogOverlay({
+    source: 'Calendar',
+    title: event.title,
+    details,
+    onConfirm: (journaledAt) => {
+      calendarJournalEntries[getCalendarJournalKey(event)] = { journaledAt, eventId: event.id, calendarId: event.calendarId };
+      saveCalendarJournalEntries();
+      renderTimeline();
+      scheduleScratchpadDriveSync();
+    }
+  });
 }
 
 function startOfLocalDay(date) {
@@ -3127,8 +3632,10 @@ function renderTimeline() {
     
     allDayEvents.forEach(event => {
       const calLabel = event.calendarName && !event.calendarName.includes('@') ? ` <span style="font-size:0.7rem; color:var(--text-secondary); font-weight:400; letter-spacing:0px;">(${escapeHtml(event.calendarName)})</span>` : '';
+      const journaled = isCalendarJournaled(event);
       highlightsHtml += `
-        <div style="padding: 12px 16px; border: 1px solid var(--border-color); background-color: rgba(0,0,0,0.01); display: flex; align-items: center; gap: 10px;">
+        <div class="calendar-all-day-item${journaled ? ' is-journaled' : ''}" style="padding: 12px 16px; border: 1px solid var(--border-color); background-color: rgba(0,0,0,0.01); display: flex; align-items: center; gap: 10px;">
+          <button class="calendar-journal-checkbox${journaled ? ' is-journaled' : ''}" type="button" data-calendar-journal-event="${escapeHtml(event.id)}" data-calendar-journal-calendar="${escapeHtml(event.calendarId)}" aria-label="${journaled ? '已寫入日記' : '寫入日記'}" aria-pressed="${journaled}"><span>${journaled ? '✓' : ''}</span></button>
           <svg style="width: 13px; height: 13px; color: var(--text-secondary); flex-shrink: 0;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><polygon points="12 6 12 12 16 14"></polygon></svg>
           <span style="font-size: 0.85rem; font-weight: 500; color: var(--text-primary); line-height: 1.4;">${escapeHtml(event.title)}${calLabel}</span>
         </div>
@@ -3188,7 +3695,8 @@ function renderTimeline() {
     const itemHeight = Math.max(45, ((endMin - startMin) / timelineDurationMins) * TIMELINE_HEIGHT); // Ensure a minimum card display height
     
     const milestoneItem = document.createElement('div');
-    milestoneItem.className = `timeline-milestone-item ${alignment} type-${event.type}`;
+    const journaled = isCalendarJournaled(event);
+    milestoneItem.className = `timeline-milestone-item ${alignment} type-${event.type}${journaled ? ' is-journaled' : ''}`;
     milestoneItem.setAttribute('data-start-time', event.start);
     milestoneItem.setAttribute('data-end-time', event.end);
     
@@ -3198,7 +3706,10 @@ function renderTimeline() {
     
     milestoneItem.innerHTML = `
       <div class="milestone-card" onclick="showCalendarEventOverlay('${event.id}')">
-        <span class="milestone-time">${event.start} - ${event.end}</span>
+        <div class="milestone-time-row">
+          <button class="calendar-journal-checkbox${journaled ? ' is-journaled' : ''}" type="button" data-calendar-journal-event="${escapeHtml(event.id)}" data-calendar-journal-calendar="${escapeHtml(event.calendarId)}" aria-label="${journaled ? '已寫入日記' : '寫入日記'}" aria-pressed="${journaled}"><span>${journaled ? '✓' : ''}</span></button>
+          <span class="milestone-time">${event.start} - ${event.end}</span>
+        </div>
         <h3 class="milestone-title">
           ${escapeHtml(cleanTitle)}
         </h3>

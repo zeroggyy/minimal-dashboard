@@ -53,58 +53,6 @@
       </button>
     </nav>
 
-    <!-- Subscription renewal reminders from a configured Google Sheet -->
-    <section id="subscription-reminder-panel" class="dashboard-card subscription-reminder-panel">
-      <div class="card-header">
-        <div class="card-title-group">
-          <i data-lucide="receipt-text" class="icon-primary"></i>
-          <h2>即將續訂</h2>
-        </div>
-        <span class="timeline-badge">Subscribe</span>
-      </div>
-      <p class="card-subtitle">未來七天即將扣款的訂閱服務。</p>
-
-      <div class="subscription-toolbar">
-        <div class="subscription-toolbar-meta">
-          <span id="subscription-summary" class="subscription-summary"></span>
-          <span id="subscription-status" class="subscription-status">尚未設定資料來源</span>
-        </div>
-        <div class="subscription-reminder-actions">
-          <button id="subscription-refresh-btn" class="subscription-text-btn hidden" type="button">
-            <i data-lucide="refresh-cw"></i>重新整理
-          </button>
-          <a id="subscription-sheet-link" class="subscription-text-btn hidden" href="#" target="_blank" rel="noopener noreferrer">
-            開啟試算表 <i data-lucide="external-link"></i>
-          </a>
-          <button id="subscription-settings-btn" class="subscription-text-btn" type="button">
-            <i data-lucide="settings-2"></i>設定
-          </button>
-        </div>
-      </div>
-
-      <form id="subscription-settings-form" class="subscription-settings-form hidden">
-        <div class="subscription-setting-field subscription-setting-url">
-          <label for="subscription-sheet-url">Google Sheet 網址</label>
-          <input id="subscription-sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." required>
-        </div>
-        <div class="subscription-setting-field">
-          <label for="subscription-sheet-name">工作表名稱</label>
-          <input id="subscription-sheet-name" type="text" placeholder="訂閱服務" required>
-        </div>
-        <div class="subscription-settings-actions">
-          <button id="subscription-settings-cancel" type="button">取消</button>
-          <button class="subscription-settings-save" type="submit">測試連線並儲存</button>
-        </div>
-        <p id="subscription-settings-error" class="subscription-settings-error hidden"></p>
-      </form>
-
-      <div id="subscription-reminder-list" class="subscription-reminder-list"></div>
-      <div id="subscription-empty-state" class="subscription-empty-state">
-        <span>連結 Google Sheet 後，這裡會顯示七日內即將到期的訂閱。</span>
-        <button id="subscription-connect-btn" type="button">連結試算表</button>
-      </div>
-    </section>
-
     <!-- Main Grid / Switchable Panels -->
     <main class="dashboard-grid" id="dashboard-main-grid">
       
@@ -152,7 +100,53 @@
           </div>
         </div>
 
-        <!-- Section 3: One randomly selected task without a due date -->
+        <!-- Section 3: Upcoming subscription renewals from a configured Google Sheet -->
+        <div id="subscription-reminder-panel" class="todo-group-section subscription-reminder-panel hidden">
+          <div class="group-section-title subscription-title">
+            <span class="subscription-title-text">
+              <i data-lucide="receipt-text"></i>
+              SUBSCRIBE / 即將續訂
+            </span>
+            <span class="subscription-title-tools">
+              <button id="subscription-refresh-btn" class="subscription-text-btn hidden" type="button" title="重新整理" aria-label="重新整理">
+                <i data-lucide="refresh-cw"></i>
+              </button>
+              <a id="subscription-sheet-link" class="subscription-text-btn hidden" href="#" target="_blank" rel="noopener noreferrer" title="開啟試算表" aria-label="開啟試算表">
+                <i data-lucide="external-link"></i>
+              </a>
+              <button id="subscription-settings-btn" class="subscription-text-btn" type="button" title="訂閱設定" aria-label="訂閱設定">
+                <i data-lucide="settings-2"></i>
+              </button>
+            </span>
+          </div>
+
+          <span id="subscription-summary" class="subscription-summary hidden" aria-hidden="true"></span>
+          <span id="subscription-status" class="subscription-status hidden" aria-hidden="true"></span>
+
+          <form id="subscription-settings-form" class="subscription-settings-form hidden">
+            <div class="subscription-setting-field subscription-setting-url">
+              <label for="subscription-sheet-url">Google Sheet 網址</label>
+              <input id="subscription-sheet-url" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." required>
+            </div>
+            <div class="subscription-setting-field">
+              <label for="subscription-sheet-name">工作表名稱</label>
+              <input id="subscription-sheet-name" type="text" placeholder="訂閱服務" required>
+            </div>
+            <div class="subscription-settings-actions">
+              <button id="subscription-settings-cancel" type="button">取消</button>
+              <button class="subscription-settings-save" type="submit">測試連線並儲存</button>
+            </div>
+            <p id="subscription-settings-error" class="subscription-settings-error hidden"></p>
+          </form>
+
+          <div id="subscription-reminder-list" class="subscription-reminder-list"></div>
+          <div id="subscription-empty-state" class="subscription-empty-state hidden">
+            <span>連結 Google Sheet 後，這裡會顯示七日內即將到期的訂閱。</span>
+            <button id="subscription-connect-btn" type="button">連結試算表</button>
+          </div>
+        </div>
+
+        <!-- Section 4: One randomly selected task without a due date -->
         <div id="todo-section-backlog" class="todo-group-section leisure-section hidden">
           <div class="group-section-title leisure-title">
             <span class="leisure-title-text">
@@ -162,7 +156,6 @@
             </span>
             <button id="backlog-reroll-btn" class="leisure-reroll-btn" type="button" aria-label="換一個有空解決的任務">
               <i data-lucide="refresh-cw"></i>
-              換一個
             </button>
           </div>
           <p class="leisure-subtitle">從尚未設定到期日的任務中，替現在的空檔挑一件。</p>
@@ -261,6 +254,10 @@
         <div id="scratchpad-list" class="scratchpad-list">
           <!-- Dynamically populated -->
         </div>
+        <details id="scratchpad-completed" class="scratchpad-completed hidden">
+          <summary>COMPLETED FLASHES / 已完成筆記 <span id="scratchpad-completed-count"></span></summary>
+          <div id="scratchpad-completed-list" class="scratchpad-list scratchpad-completed-list"></div>
+        </details>
 
         <!-- Empty state -->
         <div id="scratchpad-empty" class="scratchpad-empty hidden">
@@ -308,6 +305,49 @@
         <button id="overlay-edit-btn" class="overlay-action-btn action-edit">Edit <span class="action-slash">\</span></button>
         <button id="overlay-close-btn" class="overlay-action-btn action-close">Close <span class="action-slash">\</span></button>
       </div>
+    </div>
+  </div>
+
+  <!-- Scratchpad Detail Overlay -->
+  <div id="scratchpad-detail-overlay" class="overlay-backdrop hidden" aria-hidden="true">
+    <div class="overlay-card scratchpad-detail-card" role="dialog" aria-modal="true" aria-label="閃念內容">
+      <div class="overlay-meta-container">
+        <span class="overlay-meta-list" id="scratchpad-detail-meta">FLASH NOTE / 閃念膠囊</span>
+        <span class="overlay-meta-date" id="scratchpad-detail-date"></span>
+      </div>
+
+      <div class="overlay-body-content scratchpad-detail-content" id="scratchpad-detail-content"></div>
+      <div class="scratchpad-detail-panel" id="scratchpad-detail-panel"></div>
+      <div class="overlay-tags-container scratchpad-detail-conversions" id="scratchpad-detail-conversions"></div>
+
+      <div class="overlay-actions-container scratchpad-detail-actions" id="scratchpad-detail-actions">
+        <button class="overlay-action-btn" data-scratchpad-detail-action="task" type="button">Tasks <span class="action-slash">\</span></button>
+        <button class="overlay-action-btn" data-scratchpad-detail-action="calendar" type="button">Calendar <span class="action-slash">\</span></button>
+        <button class="overlay-action-btn" data-scratchpad-detail-action="edit" type="button">Edit <span class="action-slash">\</span></button>
+        <button class="overlay-action-btn" data-scratchpad-detail-action="complete" type="button">Complete <span class="action-slash">\</span></button>
+        <button class="overlay-action-btn" data-scratchpad-detail-action="delete" type="button">Delete <span class="action-slash">\</span></button>
+        <button class="overlay-action-btn" data-scratchpad-detail-action="close" type="button">Close <span class="action-slash">\</span></button>
+      </div>
+    </div>
+  </div>
+
+  <div id="completion-log-overlay" class="overlay-backdrop hidden" aria-hidden="true">
+    <div class="overlay-card completion-log-card" role="dialog" aria-modal="true" aria-label="完成紀錄">
+      <div class="overlay-meta-container">
+        <span class="overlay-meta-list">COMPLETED / 完成紀錄</span>
+        <span class="overlay-meta-date" id="completion-log-time"></span>
+      </div>
+      <p class="completion-log-label">完成項目</p>
+      <p class="completion-log-title" id="completion-log-item-title"></p>
+      <form class="completion-log-form">
+        <label for="completion-log-note">補充說明（選填）</label>
+        <textarea id="completion-log-note" rows="4" placeholder="想留給未來自己的脈絡…"></textarea>
+        <div class="overlay-actions-container completion-log-actions">
+          <button class="overlay-action-btn" data-completion-action="cancel" type="button">取消 <span class="action-slash">\</span></button>
+          <button class="overlay-action-btn" data-completion-action="skip" type="button">略過並完成 <span class="action-slash">\</span></button>
+          <button class="overlay-action-btn completion-log-confirm" type="submit">完成並寫入日誌 <span class="action-slash">\</span></button>
+        </div>
+      </form>
     </div>
   </div>
 

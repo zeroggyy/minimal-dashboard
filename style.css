@@ -210,26 +210,89 @@ body {
 
 /* Subscription renewal reminders */
 .subscription-reminder-panel {
-  border-bottom: 1px solid var(--border-color);
+  margin-top: 8px;
+  margin-bottom: 36px;
 }
 
-.subscription-reminder-panel .card-subtitle {
-  margin-bottom: 14px;
+.subscription-title {
+  min-height: 42px;
+  margin-bottom: 0;
+  padding: 10px 110px 10px 14px;
+  cursor: default;
+  background-color: rgba(0, 0, 0, 0.035);
 }
 
-.subscription-toolbar {
+.subscription-title:hover {
+  color: var(--text-secondary);
+  background-color: rgba(0, 0, 0, 0.06);
+}
+
+.subscription-title-text,
+.subscription-title-tools {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  padding: 0 8px 12px;
+  min-width: 0;
+  gap: 7px;
 }
 
-.subscription-toolbar-meta {
-  display: flex;
-  align-items: center;
-  gap: 8px;
+.subscription-title-text {
+  flex: 1 1 auto;
+  color: var(--text-primary);
+  overflow: hidden;
+  white-space: nowrap;
+  /* Receipt icon has a visually narrower left edge than the circular title icons. */
+  transform: translateX(5px);
 }
+
+.subscription-title-text > svg {
+  width: 13px;
+  height: 13px;
+  flex: 0 0 auto;
+  color: var(--text-primary);
+  stroke-width: 2.2px;
+}
+
+.subscription-title-tools {
+  position: absolute;
+  right: 14px;
+  gap: 5px;
+}
+
+.leisure-reroll-btn::before,
+.leisure-reroll-btn::after {
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.leisure-reroll-btn::before { content: '['; }
+.leisure-reroll-btn::after { content: ']'; }
+
+.subscription-title-tools .subscription-text-btn {
+  justify-content: center;
+  width: 31px;
+  min-width: 31px;
+  height: 26px;
+  padding: 0;
+  gap: 3px;
+}
+
+.subscription-title-tools .subscription-text-btn svg {
+  width: 13px;
+  height: 13px;
+}
+
+.subscription-title-tools .subscription-text-btn::before,
+.subscription-title-tools .subscription-text-btn::after {
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.subscription-title-tools .subscription-text-btn::before { content: '['; }
+.subscription-title-tools .subscription-text-btn::after { content: ']'; }
 
 .subscription-summary {
   color: var(--text-tertiary);
@@ -238,18 +301,21 @@ body {
   letter-spacing: 0.2px;
 }
 
-.subscription-reminder-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 12px;
-  flex-wrap: wrap;
+.subscription-summary::before {
+  content: '/';
+  margin-right: 5px;
+  color: var(--text-tertiary);
+}
+
+.subscription-summary:empty::before {
+  display: none;
 }
 
 .subscription-status {
   color: var(--text-tertiary);
   font-size: 0.68rem;
   letter-spacing: 0.2px;
+  white-space: nowrap;
 }
 
 .subscription-status[data-state="loading"] { color: var(--text-secondary); }
@@ -268,6 +334,7 @@ body {
   font-size: 0.68rem;
   text-decoration: none;
   cursor: pointer;
+  white-space: nowrap;
 }
 
 .subscription-text-btn:hover { color: var(--text-primary); border-bottom-color: currentColor; }
@@ -341,12 +408,11 @@ body {
   display: flex;
   flex-direction: column;
   margin-top: 0;
-  border-top: 1px solid var(--border-color);
 }
 
 .subscription-reminder-item {
   min-width: 0;
-  padding: 14px 8px;
+  padding: 12px 14px;
   border-bottom: 1px solid var(--border-color);
   cursor: pointer;
   transition: background-color 0.18s ease;
@@ -356,12 +422,6 @@ body {
 .subscription-reminder-item:focus-visible {
   background-color: rgba(0, 0, 0, 0.035);
   outline: none;
-}
-
-.subscription-reminder-item[data-urgency="soon"],
-.subscription-reminder-item[data-urgency="today"],
-.subscription-reminder-item[data-urgency="overdue"] {
-  border-left: 3px solid var(--accent-color);
 }
 
 .subscription-item-top {
@@ -389,8 +449,8 @@ body {
 .subscription-reminder-item[data-urgency="soon"] .subscription-item-countdown,
 .subscription-reminder-item[data-urgency="today"] .subscription-item-countdown,
 .subscription-reminder-item[data-urgency="overdue"] .subscription-item-countdown {
-  color: var(--accent-color);
-  font-weight: 600;
+  color: var(--text-secondary);
+  font-weight: 500;
 }
 
 .subscription-item-meta {
@@ -452,11 +512,12 @@ body {
 }
 
 @media (max-width: 800px) {
-  .subscription-reminder-panel { padding: 32px 20px; }
-  .subscription-toolbar { align-items: flex-start; flex-direction: column; gap: 10px; }
-  .subscription-reminder-actions { justify-content: flex-start; }
+  .subscription-title { align-items: flex-start; gap: 10px; }
+  .subscription-title-text { flex-wrap: wrap; }
+  .subscription-title-tools { justify-content: flex-end; flex-wrap: wrap; }
+  .subscription-title-tools .subscription-status { display: none; }
+  .subscription-title-tools .subscription-text-btn { padding: 3px; }
   .subscription-settings-form { grid-template-columns: 1fr; }
-  .subscription-reminder-list { grid-template-columns: 1fr; }
   .subscription-empty-state { align-items: flex-start; flex-direction: column; }
 }
 
@@ -626,6 +687,7 @@ body {
 }
 
 .group-section-title {
+  position: relative;
   font-size: 0.8rem;
   font-weight: 700;
   letter-spacing: 1px;
@@ -655,6 +717,11 @@ body {
 
 .group-section-title.collapsible.active::after {
   content: '[ - ]';
+}
+
+.overdue-title.collapsible::after {
+  position: absolute;
+  right: 14px;
 }
 
 .todo-list-wrapper {
@@ -729,10 +796,12 @@ body {
 }
 
 .leisure-reroll-btn {
+  position: absolute;
+  right: 14px;
   display: inline-flex;
   align-items: center;
-  gap: 5px;
-  padding: 5px 7px;
+  gap: 4px;
+  padding: 5px 0;
   border: 0;
   background: transparent;
   color: var(--text-secondary);
@@ -1120,6 +1189,16 @@ body {
   opacity: 0.95; /* Hover back to full visibility if inspecting past records */
 }
 
+.timeline-milestone-item.is-journaled,
+.calendar-all-day-item.is-journaled {
+  opacity: 0.58;
+}
+
+.timeline-milestone-item.is-journaled:hover,
+.calendar-all-day-item.is-journaled:hover {
+  opacity: 0.88;
+}
+
 /* Alternating Alignment */
 /* Left-aligned card container stays strictly in the left 50% zone */
 .timeline-milestone-item.align-left {
@@ -1160,6 +1239,10 @@ body {
 /* Ensure all sub-texts and spans inside the card do not block or swallow parent click events */
 .milestone-card * {
   pointer-events: none;
+}
+
+.milestone-card .calendar-journal-checkbox {
+  pointer-events: auto;
 }
 
 .milestone-card:hover {
@@ -1265,10 +1348,41 @@ body {
 .timeline-milestone-item.type-break .milestone-title { color: var(--text-primary); }
 
 /* Text details inside milestone card */
+.milestone-time-row {
+  display: grid;
+  grid-template-columns: 17px minmax(84px, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  min-width: 0;
+}
+
+.calendar-journal-checkbox {
+  width: 17px;
+  height: 17px;
+  min-width: 17px;
+  padding: 0;
+  border: 1px solid var(--text-primary);
+  border-radius: 0;
+  background: transparent;
+  color: var(--bg-primary);
+  display: inline-grid;
+  place-items: center;
+  cursor: pointer;
+  font: 700 0.72rem/1 var(--font-sans);
+  transition: var(--transition-smooth);
+}
+
+.calendar-journal-checkbox:hover { border-color: var(--accent-color); }
+.calendar-journal-checkbox.is-journaled { background: var(--text-primary); }
+.calendar-journal-checkbox span { pointer-events: none; transform: translateY(-0.5px); }
+
 .milestone-time {
+  min-width: 84px;
   font-size: 0.75rem;
   font-weight: 700;
   color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .milestone-title {
@@ -1830,8 +1944,36 @@ body {
 
 .scratchpad-list { display: flex; flex-direction: column; gap: 0; }
 
+.scratchpad-completed {
+  margin-top: 18px;
+  border-top: 1px solid var(--border-color);
+}
+
+.scratchpad-completed summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 42px;
+  cursor: pointer;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  list-style: none;
+}
+
+.scratchpad-completed summary::-webkit-details-marker { display: none; }
+.scratchpad-completed summary::before { content: '⌄'; font-size: 1rem; letter-spacing: 0; }
+.scratchpad-completed:not([open]) summary::before { transform: rotate(-90deg); }
+.scratchpad-completed-count { color: var(--text-tertiary); font-weight: 500; letter-spacing: 0; }
+.scratchpad-completed-list { border-bottom: 1px solid var(--border-color); }
+.scratchpad-note.is-completed { opacity: 0.64; }
+.scratchpad-note.is-completed .scratchpad-note-preview { text-decoration: line-through; }
+
 .scratchpad-note {
+  height: 76px;
   border-bottom: 1px solid var(--border-color);
+  overflow: hidden;
   animation: noteSlideIn 0.25s cubic-bezier(0.16,1,0.3,1);
 }
 
@@ -1846,6 +1988,83 @@ body {
   gap: 0;
   padding: 14px 0;
 }
+
+.scratchpad-note-summary {
+  width: 100%;
+  height: 100%;
+  padding: 0 2px 0 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+}
+
+.scratchpad-note-summary:hover .scratchpad-note-preview { color: var(--accent-color); }
+.scratchpad-note-summary:hover .scratchpad-note-indicator { color: var(--accent-color); transform: translateX(2px); }
+.scratchpad-note-summary:focus-visible { outline: 1px solid var(--text-primary); outline-offset: -1px; }
+
+.scratchpad-note-sequence {
+  flex: 0 0 26px;
+  color: var(--text-tertiary);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  text-align: left;
+}
+
+.scratchpad-note-preview {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  line-height: 1.55;
+  word-break: break-word;
+  transition: var(--transition-smooth);
+}
+
+.scratchpad-note-preview[data-truncated="true"]::after {
+  content: '…';
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  padding-left: 5px;
+  background: var(--bg-card);
+  color: var(--text-secondary);
+}
+
+.scratchpad-note-preview-measure {
+  position: fixed;
+  left: -9999px;
+  top: 0;
+  display: block;
+  visibility: hidden;
+  white-space: normal;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.scratchpad-note-indicator {
+  flex: 0 0 auto;
+  width: 20px;
+  color: var(--text-tertiary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition-smooth);
+}
+
+.scratchpad-note-indicator svg { width: 15px; height: 15px; }
 
 .scratchpad-note.has-image .scratchpad-note-row { align-items: flex-start; }
 
@@ -2238,11 +2457,98 @@ body {
 
 .scratchpad-note.sending { opacity: 0.35; pointer-events: none; transition: opacity 0.3s ease; }
 
+.scratchpad-detail-card {
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+}
+
+.scratchpad-detail-content {
+  margin-bottom: 0;
+  white-space: normal;
+}
+
+.scratchpad-detail-content:empty,
+.scratchpad-detail-panel:empty,
+.scratchpad-detail-conversions:empty { display: none; }
+
+.scratchpad-detail-markdown {
+  margin-bottom: 24px;
+  font-size: 1rem;
+  line-height: 1.8;
+}
+
+.scratchpad-detail-image-frame {
+  width: 100%;
+  max-width: none;
+  margin: 0 0 24px;
+}
+
+.scratchpad-detail-conversions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  margin-bottom: 30px;
+}
+
+.scratchpad-detail-conversions a {
+  color: var(--text-secondary);
+  text-decoration: none;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.scratchpad-detail-conversions a:hover { color: var(--accent-color); border-color: currentColor; }
+
+.scratchpad-detail-actions {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 12px;
+}
+
+.scratchpad-detail-actions[hidden] { display: none; }
+.scratchpad-detail-actions [data-scratchpad-detail-action="delete"] { color: var(--accent-color); }
+.scratchpad-detail-card.sending { opacity: 0.45; pointer-events: none; transition: opacity 0.3s ease; }
+
+.completion-log-card { width: min(560px, calc(100vw - 32px)); }
+.completion-log-label {
+  margin: 0 0 5px;
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+.completion-log-title {
+  margin: 0 0 26px;
+  color: var(--text-primary);
+  font-family: var(--font-serif);
+  font-size: 1.5rem;
+  line-height: 1.45;
+  word-break: break-word;
+}
+.completion-log-form { display: flex; flex-direction: column; gap: 9px; }
+.completion-log-form label { color: var(--text-secondary); font-size: 0.8rem; font-weight: 700; }
+.completion-log-form textarea {
+  width: 100%;
+  min-height: 104px;
+  resize: vertical;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.65;
+  padding: 11px 12px;
+}
+.completion-log-form textarea:focus { outline: none; border-color: var(--text-primary); }
+.completion-log-actions { margin-top: 14px; gap: 10px; flex-wrap: wrap; }
+.completion-log-confirm { background: var(--text-primary); color: var(--bg-primary); }
+
 @media (max-width: 520px) {
   .scratchpad-edit-footer { align-items: flex-start; flex-direction: column; }
   .scratchpad-edit-actions { align-self: stretch; }
   .scratchpad-edit-cancel,
   .scratchpad-edit-save { flex: 1; }
+
+  .scratchpad-detail-card { max-height: calc(100vh - 32px); }
+  .scratchpad-detail-actions { justify-content: flex-start; }
 }
 
 .scratchpad-empty {
