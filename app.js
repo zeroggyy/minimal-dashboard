@@ -1577,6 +1577,7 @@ function openScratchpadDetailOverlay(noteId) {
   const actions = document.getElementById('scratchpad-detail-actions');
   if (!note || !overlay || !meta || !date || !content || !panel || !conversions || !actions) return;
 
+  overlay.querySelector('.scratchpad-detail-card')?.classList.remove('sending');
   const previousUrl = scratchpadImageObjectUrls.get(activeScratchpadNoteId);
   if (previousUrl && activeScratchpadNoteId !== note.id) {
     URL.revokeObjectURL(previousUrl);
@@ -1899,6 +1900,7 @@ async function submitScratchpadConversion(form) {
     saveScratchpadNotes();
     renderScratchpadNotes();
     scheduleScratchpadDriveSync();
+    form.closest('.scratchpad-detail-card')?.classList.remove('sending');
     openScratchpadDetailOverlay(note.id);
   } catch (error) {
     console.error('Scratchpad conversion failed:', error);
